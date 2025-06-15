@@ -1,0 +1,23 @@
+{
+  "name": "shurenai-website",
+  "version": "1.0.0",
+  "description": "数刃AI官方网站",
+  "main": "index.html",
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo 'Build complete'",
+    "deploy": "netlify deploy --prod"
+  },
+  "keywords": [
+    "AI",
+    "数刃AI",
+    "飞书",
+    "netlify"
+  ],
+  "author": "数刃AI团队",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "netlify-cli": "^17.0.0"
+  }
+} 

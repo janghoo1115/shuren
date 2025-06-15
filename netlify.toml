@@ -1,0 +1,17 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# 环境变量示例（实际部署时需要在Netlify后台配置）
+# FEISHU_APP_ID = "你的飞书应用ID"
+# FEISHU_APP_SECRET = "你的飞书应用密钥"
+# FEISHU_ENCRYPT_KEY = "你的飞书加密密钥"
+# FEISHU_VERIFICATION_TOKEN = "你的飞书验证令牌" 
