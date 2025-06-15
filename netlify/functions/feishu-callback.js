@@ -114,18 +114,20 @@ exports.handler = async (event, context) => {
       },
       body: JSON.stringify({
         grant_type: 'authorization_code',
-        client_id: FEISHU_APP_ID,
-        client_secret: FEISHU_APP_SECRET,
+        app_id: FEISHU_APP_ID,
+        app_secret: FEISHU_APP_SECRET,
         code: code,
         redirect_uri: FEISHU_REDIRECT_URI
       })
     };
 
     console.log('Token请求参数:', JSON.stringify(tokenRequest.body, null, 2));
+    console.log('请求URL: https://open.feishu.cn/open-apis/authen/v1/oidc/access_token');
 
     const tokenResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/oidc/access_token', tokenRequest);
-    const tokenData = await tokenResponse.json();
+    console.log('HTTP响应状态:', tokenResponse.status);
     
+    const tokenData = await tokenResponse.json();
     console.log('Token响应:', JSON.stringify(tokenData, null, 2));
 
     if (tokenData.code === 0) {
