@@ -5,7 +5,9 @@ const FeishuCrypto = require('./utils/crypto');
  * 用于处理消息、应用安装等各种飞书事件
  */
 exports.handler = async (event, context) => {
-  console.log('收到飞书回调请求:', event);
+  console.log('收到飞书回调请求:', JSON.stringify(event, null, 2));
+  console.log('请求方法:', event.httpMethod);
+  console.log('请求体:', event.body);
 
   // 设置CORS头
   const headers = {
@@ -56,12 +58,14 @@ exports.handler = async (event, context) => {
 
     // 处理 URL 验证请求
     if (requestBody.type === 'url_verification') {
-      console.log('收到URL验证请求');
-      return {
+      console.log('收到URL验证请求，challenge值:', requestBody.challenge);
+      const response = {
         statusCode: 200,
         headers,
         body: JSON.stringify({ challenge: requestBody.challenge })
       };
+      console.log('返回验证响应:', JSON.stringify(response, null, 2));
+      return response;
     }
 
     const { encrypt, timestamp, nonce, signature } = requestBody;
