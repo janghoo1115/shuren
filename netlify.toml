@@ -3,12 +3,19 @@
   functions = "netlify/functions"
 
 [functions]
-  node_bundler = "esbuild"
+directory = "netlify/functions"
+node_bundler = "esbuild"
+external_node_modules = ["@sentry/node"]
 
 [[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
+from = "/api/feishu-verify"
+to = "/.netlify/functions/feishu-verify"
+status = 200
+
+[[redirects]]
+from = "/api/feishu-callback"
+to = "/.netlify/functions/feishu-callback"
+status = 200
 
 # 环境变量示例（实际部署时需要在Netlify后台配置）
 # FEISHU_APP_ID = "你的飞书应用ID"
