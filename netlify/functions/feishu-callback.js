@@ -1,20 +1,17 @@
-const FeishuCrypto = require('./utils/crypto');
-
 /**
- * 飞书事件回调处理函数
- * 用于处理消息、应用安装等各种飞书事件
+ * 飞书OAuth授权回调处理函数
+ * 处理用户授权后的回调，获取访问令牌
  */
 exports.handler = async (event, context) => {
-  console.log('收到飞书回调请求:', JSON.stringify(event, null, 2));
-  console.log('请求方法:', event.httpMethod);
-  console.log('请求体:', event.body);
+  console.log('飞书授权回调请求:', event.httpMethod);
+  console.log('查询参数:', event.queryStringParameters);
 
   // 设置CORS头
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Content-Type': 'application/json'
+    'Content-Type': 'text/html; charset=utf-8'
   };
 
   // 处理OPTIONS预检请求
@@ -26,238 +23,310 @@ exports.handler = async (event, context) => {
     };
   }
 
+  // 只处理GET请求
+  if (event.httpMethod !== 'GET') {
+    return {
+      statusCode: 405,
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ error: '方法不允许' })
+    };
+  }
+
   try {
-    // 获取环境变量
-    const encryptKey = process.env.FEISHU_ENCRYPT_KEY;
-    const verificationToken = process.env.FEISHU_VERIFICATION_TOKEN;
-    const appId = process.env.FEISHU_APP_ID;
-    const appSecret = process.env.FEISHU_APP_SECRET;
+    // 飞书应用配置
+    const FEISHU_APP_ID = "cli_a8c3c35f5230d00e";
+    const FEISHU_APP_SECRET = "bAbJhKTOnzLyBxHwbK2hkgkRPFsPTRgw";
+    const FEISHU_REDIRECT_URI = "https://shurenai.xyz/.netlify/functions/feishu-callback";
 
-    if (!encryptKey || !verificationToken) {
-      console.error('缺少必要的环境变量');
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ error: '服务配置错误' })
-      };
-    }
+    // 获取查询参数
+    const { code, state, error } = event.queryStringParameters || {};
 
-    // 解析请求体
-    let requestBody;
-    try {
-      requestBody = JSON.parse(event.body);
-      console.log('解析的请求体:', requestBody);  // 添加日志
-    } catch (error) {
-      console.error('请求体解析失败:', error);
+    console.log('回调参数:', { code, state, error });
+
+    // 检查是否有错误
+    if (error) {
+      const errorHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>授权失败</title>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+              body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+              .error { color: #d32f2f; background: #ffebee; padding: 20px; border-radius: 4px; margin: 20px 0; }
+          </style>
+      </head>
+      <body>
+          <h1>❌ 授权失败</h1>
+          <div class="error">错误信息: ${error}</div>
+          <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
+      </body>
+      </html>
+      `;
+      
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: '请求格式错误' })
+        body: errorHtml
       };
     }
 
-    // 处理 URL 验证请求
-    if (requestBody.type === 'url_verification') {
-      console.log('收到URL验证请求，challenge值:', requestBody.challenge);
-      const response = {
+    // 检查是否有授权码
+    if (!code) {
+      const noCodeHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>授权失败</title>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+              body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+              .error { color: #d32f2f; background: #ffebee; padding: 20px; border-radius: 4px; margin: 20px 0; }
+          </style>
+      </head>
+      <body>
+          <h1>❌ 授权失败</h1>
+          <div class="error">未收到授权码</div>
+          <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
+      </body>
+      </html>
+      `;
+      
+      return {
+        statusCode: 400,
+        headers,
+        body: noCodeHtml
+      };
+    }
+
+    // 使用授权码获取访问令牌
+    console.log('开始获取访问令牌...');
+    
+    const tokenRequest = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        grant_type: 'authorization_code',
+        client_id: FEISHU_APP_ID,
+        client_secret: FEISHU_APP_SECRET,
+        code: code,
+        redirect_uri: FEISHU_REDIRECT_URI
+      })
+    };
+
+    console.log('Token请求参数:', JSON.stringify(tokenRequest.body, null, 2));
+
+    const tokenResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/oidc/access_token', tokenRequest);
+    const tokenData = await tokenResponse.json();
+    
+    console.log('Token响应:', JSON.stringify(tokenData, null, 2));
+
+    if (tokenData.code === 0) {
+      const accessToken = tokenData.data.access_token;
+      const refreshToken = tokenData.data.refresh_token;
+      const expiresIn = tokenData.data.expires_in;
+      
+      console.log('获取访问令牌成功');
+
+      const successHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>授权成功</title>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+              body {
+                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+                  max-width: 800px;
+                  margin: 50px auto;
+                  padding: 20px;
+                  background-color: #f5f5f5;
+                  line-height: 1.6;
+              }
+              .container {
+                  background: white;
+                  padding: 40px;
+                  border-radius: 8px;
+                  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              }
+              .success {
+                  color: #2e7d32;
+                  background: #e8f5e8;
+                  padding: 20px;
+                  border-radius: 4px;
+                  margin: 20px 0;
+                  text-align: center;
+              }
+              .token-box {
+                  background: #f8f9fa;
+                  border: 1px solid #dee2e6;
+                  border-radius: 4px;
+                  padding: 15px;
+                  margin: 15px 0;
+                  font-family: monospace;
+                  font-size: 12px;
+                  word-break: break-all;
+                  max-height: 150px;
+                  overflow-y: auto;
+              }
+              .copy-btn {
+                  background-color: #007bff;
+                  color: white;
+                  border: none;
+                  padding: 8px 16px;
+                  border-radius: 4px;
+                  cursor: pointer;
+                  margin: 5px;
+              }
+              .copy-btn:hover {
+                  background-color: #0056b3;
+              }
+              .instructions {
+                  background-color: #fff3cd;
+                  border: 1px solid #ffeaa7;
+                  border-radius: 4px;
+                  padding: 15px;
+                  margin: 20px 0;
+              }
+              h1 { color: #333; text-align: center; }
+              h3 { color: #495057; margin-top: 25px; }
+          </style>
+      </head>
+      <body>
+          <div class="container">
+              <h1>🎉 授权成功！</h1>
+              <div class="success">
+                  您已成功授权飞书文档访问权限！
+              </div>
+              
+              <div class="instructions">
+                  <strong>📋 接下来的步骤：</strong>
+                  <ol>
+                      <li>复制下面的访问令牌</li>
+                      <li>在您的本地项目中设置环境变量</li>
+                      <li>运行测试脚本验证文档创建功能</li>
+                  </ol>
+              </div>
+
+              <h3>🔑 访问令牌 (Access Token):</h3>
+              <div class="token-box" id="accessToken">${accessToken}</div>
+              <button class="copy-btn" onclick="copyToken('accessToken')">复制访问令牌</button>
+
+              <h3>🔄 刷新令牌 (Refresh Token):</h3>
+              <div class="token-box" id="refreshToken">${refreshToken}</div>
+              <button class="copy-btn" onclick="copyToken('refreshToken')">复制刷新令牌</button>
+
+              <h3>⏰ 令牌有效期:</h3>
+              <p>访问令牌将在 ${expiresIn} 秒后过期 (约 ${Math.round(expiresIn / 3600)} 小时)</p>
+
+              <div class="instructions">
+                  <strong>💡 使用说明：</strong>
+                  <br>请在您的 <code>.env</code> 文件中设置：
+                  <br><code>FEISHU_USER_ACCESS_TOKEN=${accessToken}</code>
+                  <br>然后运行您的测试脚本来创建飞书文档。
+              </div>
+          </div>
+
+          <script>
+              function copyToken(elementId) {
+                  const element = document.getElementById(elementId);
+                  const text = element.textContent;
+                  
+                  navigator.clipboard.writeText(text).then(function() {
+                      const btn = event.target;
+                      const originalText = btn.textContent;
+                      btn.textContent = '✅ 已复制';
+                      btn.style.backgroundColor = '#28a745';
+                      
+                      setTimeout(function() {
+                          btn.textContent = originalText;
+                          btn.style.backgroundColor = '#007bff';
+                      }, 2000);
+                  }).catch(function(err) {
+                      alert('复制失败，请手动复制令牌');
+                  });
+              }
+          </script>
+      </body>
+      </html>
+      `;
+
+      return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ challenge: requestBody.challenge })
+        body: successHtml
       };
-      console.log('返回验证响应:', JSON.stringify(response, null, 2));
-      return response;
-    }
 
-    const { encrypt, timestamp, nonce, signature } = requestBody;
+    } else {
+      console.error('获取令牌失败:', tokenData);
+      
+      const tokenErrorHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>获取令牌失败</title>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+              body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+              .error { color: #d32f2f; background: #ffebee; padding: 20px; border-radius: 4px; margin: 20px 0; }
+              .details { font-family: monospace; font-size: 12px; text-align: left; }
+          </style>
+      </head>
+      <body>
+          <h1>❌ 获取令牌失败</h1>
+          <div class="error">
+              <div>错误代码: ${tokenData.code}</div>
+              <div>错误信息: ${tokenData.msg || '未知错误'}</div>
+              <div class="details">详细信息: ${JSON.stringify(tokenData, null, 2)}</div>
+          </div>
+          <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
+      </body>
+      </html>
+      `;
 
-    // 验证必要参数
-    if (!encrypt || !timestamp || !nonce || !signature) {
-      console.error('缺少必要参数');
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: '缺少必要参数' })
+        body: tokenErrorHtml
       };
-    }
-
-    // 初始化加解密工具
-    const crypto = new FeishuCrypto(encryptKey);
-
-    // 验证签名
-    const isValidSignature = crypto.verifySignature(timestamp, nonce, encrypt, signature);
-    if (!isValidSignature) {
-      console.error('签名验证失败');
-      return {
-        statusCode: 401,
-        headers,
-        body: JSON.stringify({ error: '签名验证失败' })
-      };
-    }
-
-    // 解密数据
-    let decryptedData;
-    try {
-      decryptedData = crypto.decrypt(encrypt, encryptKey);
-      console.log('解密成功:', decryptedData);
-    } catch (error) {
-      console.error('解密失败:', error);
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: '数据解密失败' })
-      };
-    }
-
-    // 解析解密后的数据
-    let eventData;
-    try {
-      eventData = JSON.parse(decryptedData);
-    } catch (error) {
-      console.error('解密数据解析失败:', error);
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: '解密数据格式错误' })
-      };
-    }
-
-    // 验证token
-    if (eventData.token !== verificationToken) {
-      console.error('Token验证失败');
-      return {
-        statusCode: 401,
-        headers,
-        body: JSON.stringify({ error: 'Token验证失败' })
-      };
-    }
-
-    console.log('收到事件:', eventData);
-
-    // 根据事件类型处理不同的回调
-    switch (eventData.type) {
-      case 'im.message.receive_v1':
-        return await handleMessageReceive(eventData, headers);
-      
-      case 'application.app_uninstalled':
-        return await handleAppUninstalled(eventData, headers);
-      
-      case 'application.app_open':
-        return await handleAppOpen(eventData, headers);
-      
-      default:
-        console.log('未知事件类型:', eventData.type);
-        return {
-          statusCode: 200,
-          headers,
-          body: JSON.stringify({ success: true, message: '事件已收到' })
-        };
     }
 
   } catch (error) {
     console.error('处理回调时发生错误:', error);
+    
+    const serverErrorHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>服务器错误</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+            .error { color: #d32f2f; background: #ffebee; padding: 20px; border-radius: 4px; margin: 20px 0; }
+        </style>
+    </head>
+    <body>
+        <h1>❌ 处理授权时出错</h1>
+        <div class="error">错误信息: ${error.message}</div>
+        <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
+    </body>
+    </html>
+    `;
+
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ error: '服务器内部错误' })
+      body: serverErrorHtml
     };
   }
-};
-
-/**
- * 处理接收消息事件
- */
-async function handleMessageReceive(eventData, headers) {
-  try {
-    const { event } = eventData;
-    const { sender, message } = event;
-    
-    console.log('收到消息:', {
-      发送者: sender,
-      消息内容: message.content,
-      消息类型: message.message_type
-    });
-
-    // 这里可以添加具体的消息处理逻辑
-    // 例如：自动回复、消息转发、AI处理等
-    
-    // 示例：简单的自动回复逻辑
-    if (message.message_type === 'text') {
-      const textContent = JSON.parse(message.content);
-      const userText = textContent.text;
-      
-      // 这里可以调用AI接口或其他业务逻辑
-      console.log('用户发送的文本:', userText);
-      
-      // 可以在这里添加回复逻辑
-      // await sendReplyMessage(sender, '收到您的消息：' + userText);
-    }
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ success: true, message: '消息处理成功' })
-    };
-    
-  } catch (error) {
-    console.error('处理消息事件失败:', error);
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: '消息处理失败' })
-    };
-  }
-}
-
-/**
- * 处理应用卸载事件
- */
-async function handleAppUninstalled(eventData, headers) {
-  try {
-    const { event } = eventData;
-    console.log('应用被卸载:', event);
-    
-    // 这里可以添加应用卸载后的清理逻辑
-    // 例如：清理用户数据、记录卸载日志等
-    
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ success: true, message: '卸载事件处理成功' })
-    };
-    
-  } catch (error) {
-    console.error('处理卸载事件失败:', error);
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: '卸载事件处理失败' })
-    };
-  }
-}
-
-/**
- * 处理应用打开事件
- */
-async function handleAppOpen(eventData, headers) {
-  try {
-    const { event } = eventData;
-    console.log('应用被打开:', event);
-    
-    // 这里可以添加应用打开后的逻辑
-    // 例如：记录用户访问、发送欢迎消息等
-    
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ success: true, message: '应用打开事件处理成功' })
-    };
-    
-  } catch (error) {
-    console.error('处理应用打开事件失败:', error);
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: '应用打开事件处理失败' })
-    };
-  }
-} 
+}; 

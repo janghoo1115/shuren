@@ -1,18 +1,16 @@
-const FeishuCrypto = require('./utils/crypto');
-
 /**
- * 飞书URL验证函数
- * 用于验证飞书回调URL的有效性
+ * 飞书OAuth授权页面
+ * 显示授权页面并引导用户进行飞书授权
  */
 exports.handler = async (event, context) => {
-  console.log('收到飞书验证请求:', event);
+  console.log('飞书授权页面请求:', event.httpMethod);
 
   // 设置CORS头
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Content-Type': 'application/json'
+    'Content-Type': 'text/html; charset=utf-8'
   };
 
   // 处理OPTIONS预检请求
@@ -24,121 +22,126 @@ exports.handler = async (event, context) => {
     };
   }
 
+  // 只处理GET请求
+  if (event.httpMethod !== 'GET') {
+    return {
+      statusCode: 405,
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ error: '方法不允许' })
+    };
+  }
+
   try {
-    // 获取环境变量
-    const encryptKey = process.env.FEISHU_ENCRYPT_KEY;
-    const verificationToken = process.env.FEISHU_VERIFICATION_TOKEN;
+    // 飞书应用配置
+    const FEISHU_APP_ID = "cli_a8c3c35f5230d00e";
+    const FEISHU_REDIRECT_URI = "https://shurenai.xyz/.netlify/functions/feishu-callback";
 
-    if (!encryptKey || !verificationToken) {
-      console.error('缺少必要的环境变量');
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ error: '服务配置错误' })
-      };
-    }
+    // 构造授权URL
+    const authUrl = `https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=${FEISHU_APP_ID}&redirect_uri=${encodeURIComponent(FEISHU_REDIRECT_URI)}&scope=docx:document&state=feishu_auth`;
 
-    // 解析请求体
-    let requestBody;
-    try {
-      requestBody = JSON.parse(event.body);
-    } catch (error) {
-      console.error('请求体解析失败:', error);
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: '请求格式错误' })
-      };
-    }
-
-    const { encrypt, timestamp, nonce, signature } = requestBody;
-
-    // 验证必要参数
-    if (!encrypt || !timestamp || !nonce || !signature) {
-      console.error('缺少必要参数');
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: '缺少必要参数' })
-      };
-    }
-
-    // 初始化加解密工具
-    const crypto = new FeishuCrypto(encryptKey);
-
-    // 验证签名
-    const isValidSignature = crypto.verifySignature(timestamp, nonce, encrypt, signature);
-    if (!isValidSignature) {
-      console.error('签名验证失败');
-      return {
-        statusCode: 401,
-        headers,
-        body: JSON.stringify({ error: '签名验证失败' })
-      };
-    }
-
-    // 解密数据
-    let decryptedData;
-    try {
-      decryptedData = crypto.decrypt(encrypt, encryptKey);
-      console.log('解密成功:', decryptedData);
-    } catch (error) {
-      console.error('解密失败:', error);
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: '数据解密失败' })
-      };
-    }
-
-    // 解析解密后的数据
-    let eventData;
-    try {
-      eventData = JSON.parse(decryptedData);
-    } catch (error) {
-      console.error('解密数据解析失败:', error);
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: '解密数据格式错误' })
-      };
-    }
-
-    // 处理URL验证挑战
-    if (eventData.type === 'url_verification') {
-      const challenge = eventData.challenge;
-      console.log('URL验证挑战:', challenge);
-      
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ challenge })
-      };
-    }
-
-    // 验证token
-    if (eventData.token !== verificationToken) {
-      console.error('Token验证失败');
-      return {
-        statusCode: 401,
-        headers,
-        body: JSON.stringify({ error: 'Token验证失败' })
-      };
-    }
-
-    console.log('验证成功，事件数据:', eventData);
+    // 返回授权页面HTML
+    const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>飞书授权</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+                max-width: 600px;
+                margin: 50px auto;
+                padding: 20px;
+                text-align: center;
+                background-color: #f5f5f5;
+                line-height: 1.6;
+            }
+            .container {
+                background: white;
+                padding: 40px;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }
+            h1 {
+                color: #333;
+                margin-bottom: 20px;
+            }
+            p {
+                color: #666;
+                margin-bottom: 15px;
+            }
+            .btn {
+                background-color: #00B96B;
+                color: white;
+                padding: 12px 24px;
+                text-decoration: none;
+                border-radius: 6px;
+                display: inline-block;
+                margin: 20px 0;
+                font-size: 16px;
+                font-weight: 500;
+                transition: background-color 0.3s;
+            }
+            .btn:hover {
+                background-color: #009954;
+            }
+            .info {
+                background-color: #f8f9fa;
+                border-left: 4px solid #00B96B;
+                padding: 15px;
+                margin: 20px 0;
+                text-align: left;
+            }
+            .small {
+                font-size: 14px;
+                color: #888;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🚀 飞书文档授权</h1>
+            <p>为了让系统能够创建和编辑您的飞书文档，需要您授权文档访问权限。</p>
+            
+            <div class="info">
+                <strong>授权后系统将能够：</strong>
+                <ul style="margin: 10px 0; padding-left: 20px;">
+                    <li>在您的飞书空间创建新文档</li>
+                    <li>编辑和更新文档内容</li>
+                    <li>自动保存AI总结的对话记录</li>
+                </ul>
+            </div>
+            
+            <p>点击下方按钮进行安全授权：</p>
+            <a href="${authUrl}" class="btn">🔐 授权飞书文档访问</a>
+            
+            <p class="small">
+                授权过程完全安全，遵循飞书官方OAuth2.0标准协议。<br>
+                您可以随时在飞书设置中撤销授权。
+            </p>
+        </div>
+    </body>
+    </html>
+    `;
 
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ success: true, message: '验证成功' })
+      body: htmlContent
     };
 
   } catch (error) {
-    console.error('处理请求时发生错误:', error);
+    console.error('生成授权页面时发生错误:', error);
     return {
       statusCode: 500,
-      headers,
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({ error: '服务器内部错误' })
     };
   }
