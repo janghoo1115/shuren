@@ -44,12 +44,23 @@ exports.handler = async (event, context) => {
     let requestBody;
     try {
       requestBody = JSON.parse(event.body);
+      console.log('解析的请求体:', requestBody);  // 添加日志
     } catch (error) {
       console.error('请求体解析失败:', error);
       return {
         statusCode: 400,
         headers,
         body: JSON.stringify({ error: '请求格式错误' })
+      };
+    }
+
+    // 处理 URL 验证请求
+    if (requestBody.type === 'url_verification') {
+      console.log('收到URL验证请求');
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ challenge: requestBody.challenge })
       };
     }
 
