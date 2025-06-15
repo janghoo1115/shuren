@@ -37,7 +37,7 @@ exports.handler = async (event, context) => {
   try {
     // 飞书应用配置
     const FEISHU_APP_ID = "cli_a8c3c35f5230d00e";
-    const FEISHU_REDIRECT_URI = "https://shurenai.xyz/.netlify/functions/feishu-callback";
+         const FEISHU_REDIRECT_URI = "https://shurenai.xyz/.netlify/functions/feishu-callback";
 
     // 构造授权URL
     const authUrl = `https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=${FEISHU_APP_ID}&redirect_uri=${encodeURIComponent(FEISHU_REDIRECT_URI)}&scope=docx:document&state=feishu_auth`;
