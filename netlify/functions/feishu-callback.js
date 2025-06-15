@@ -39,7 +39,7 @@ exports.handler = async (event, context) => {
     // 飞书应用配置
     const FEISHU_APP_ID = "cli_a8c3c35f5230d00e";
     const FEISHU_APP_SECRET = "bAbJhKTOnzLyBxHwbK2hkgkRPFsPTRgw";
-    const FEISHU_REDIRECT_URI = "https://shurenai.xyz/.netlify/functions/feishu-callback";
+         const FEISHU_REDIRECT_URI = "https://shurenai.xyz/.netlify/functions/feishu-callback";
 
     // 获取查询参数
     const { code, state, error } = event.queryStringParameters || {};
@@ -63,7 +63,7 @@ exports.handler = async (event, context) => {
       <body>
           <h1>❌ 授权失败</h1>
           <div class="error">错误信息: ${error}</div>
-          <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
+          <p><a href="/api/feishu-verify">重新授权</a></p>
       </body>
       </html>
       `;
@@ -92,7 +92,7 @@ exports.handler = async (event, context) => {
       <body>
           <h1>❌ 授权失败</h1>
           <div class="error">未收到授权码</div>
-          <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
+          <p><a href="/api/feishu-verify">重新授权</a></p>
       </body>
       </html>
       `;
@@ -288,7 +288,7 @@ exports.handler = async (event, context) => {
               <div>错误信息: ${tokenData.msg || '未知错误'}</div>
               <div class="details">详细信息: ${JSON.stringify(tokenData, null, 2)}</div>
           </div>
-          <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
+          <p><a href="/api/feishu-verify">重新授权</a></p>
       </body>
       </html>
       `;
@@ -318,7 +318,7 @@ exports.handler = async (event, context) => {
     <body>
         <h1>❌ 处理授权时出错</h1>
         <div class="error">错误信息: ${error.message}</div>
-        <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
+        <p><a href="/api/feishu-verify">重新授权</a></p>
     </body>
     </html>
     `;
