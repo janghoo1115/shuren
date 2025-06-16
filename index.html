@@ -8,25 +8,188 @@
         body {
             margin: 0;
             padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
-            background-color: #ffffff;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
             min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-
-        .main-title {
-            font-size: 56px;
-            font-weight: 600;
-            color: #1d1d1f;
+        
+        .container {
             text-align: center;
-            letter-spacing: -0.005em;
-            line-height: 1.07143;
+            color: white;
+            max-width: 800px;
+            padding: 40px 20px;
+        }
+        
+        h1 {
+            font-size: 4rem;
+            font-weight: 300;
+            margin-bottom: 2rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            letter-spacing: -2px;
+        }
+        
+        .subtitle {
+            font-size: 1.5rem;
+            margin-bottom: 3rem;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 3rem;
+        }
+        
+        .feature-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.3s ease;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .feature-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        
+        .feature-title {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            font-weight: 500;
+        }
+        
+        .feature-description {
+            opacity: 0.8;
+            line-height: 1.6;
+        }
+        
+        .cta-button {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 500;
+            margin: 10px;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+        
+        .cta-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.5);
+            transform: translateY(-2px);
+        }
+        
+        .cta-button.primary {
+            background: linear-gradient(45deg, #00B96B, #009954);
+            border-color: #00B96B;
+        }
+        
+        .cta-button.primary:hover {
+            background: linear-gradient(45deg, #009954, #007a3d);
+            box-shadow: 0 5px 15px rgba(0, 185, 107, 0.4);
+        }
+        
+        .share-section {
+            margin-top: 3rem;
+            padding: 2rem;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .share-url {
+            background: rgba(0, 0, 0, 0.2);
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.9rem;
+            margin: 15px 0;
+            word-break: break-all;
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
     </style>
 </head>
 <body>
-    <h1 class="main-title">数刃AI</h1>
+    <div class="container">
+        <h1>数刃AI</h1>
+        <p class="subtitle">智能文档处理，让工作更高效</p>
+        
+        <div class="features">
+            <div class="feature-card">
+                <div class="feature-icon">🤖</div>
+                <div class="feature-title">AI驱动</div>
+                <div class="feature-description">基于先进的人工智能技术，为您提供智能化的文档处理解决方案</div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">🚀</div>
+                <div class="feature-title">高效便捷</div>
+                <div class="feature-description">简化繁琐的文档操作流程，让您专注于更重要的创作内容</div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">🔗</div>
+                <div class="feature-title">飞书集成</div>
+                <div class="feature-description">深度集成飞书生态系统，一键创建和管理您的云文档</div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 3rem;">
+            <h3>🧪 体验演示功能</h3>
+            <a href="/.netlify/functions/feishu-verify" class="cta-button">开发者测试</a>
+            <a href="/.netlify/functions/feishu-auto-verify" class="cta-button primary">📝 一键创建飞书文档</a>
+        </div>
+        
+        <div class="share-section">
+            <h3>📤 分享给朋友</h3>
+            <p>复制以下链接分享给朋友，他们点击后可以直接在自己的飞书账户中创建测试文档：</p>
+            <div class="share-url">
+                https://shurenai.xyz/.netlify/functions/feishu-auto-verify
+            </div>
+            <button onclick="copyToClipboard()" class="cta-button" style="background: rgba(255, 255, 255, 0.2);">
+                📋 复制链接
+            </button>
+        </div>
+    </div>
+    
+    <script>
+        function copyToClipboard() {
+            const url = 'https://shurenai.xyz/.netlify/functions/feishu-auto-verify';
+            navigator.clipboard.writeText(url).then(function() {
+                alert('链接已复制到剪贴板！');
+            }, function(err) {
+                console.error('无法复制链接: ', err);
+                // 备用方法
+                const textArea = document.createElement("textarea");
+                textArea.value = url;
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    alert('链接已复制到剪贴板！');
+                } catch (err) {
+                    alert('复制失败，请手动复制链接');
+                }
+                document.body.removeChild(textArea);
+            });
+        }
+    </script>
 </body>
 </html> 
