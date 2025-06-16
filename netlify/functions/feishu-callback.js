@@ -36,16 +36,10 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    // 飞书应用配置 - 使用最新的正确配置
+    // 飞书应用配置
     const FEISHU_APP_ID = "cli_a8c3c35f5230d00e";
     const FEISHU_APP_SECRET = "bAbJhKTOnzLyBxHwbK2hkgkRPFsPTRgw";
     const FEISHU_REDIRECT_URI = "https://shurenai.xyz/.netlify/functions/feishu-callback";
-    
-    console.log('使用配置:', {
-      app_id: FEISHU_APP_ID,
-      app_secret: FEISHU_APP_SECRET.substring(0, 10) + '...',
-      redirect_uri: FEISHU_REDIRECT_URI
-    });
 
     // 获取查询参数
     const { code, state, error } = event.queryStringParameters || {};
@@ -69,7 +63,7 @@ exports.handler = async (event, context) => {
       <body>
           <h1>❌ 授权失败</h1>
           <div class="error">错误信息: ${error}</div>
-          <p><a href="/api/feishu-verify">重新授权</a></p>
+          <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
       </body>
       </html>
       `;
@@ -98,7 +92,7 @@ exports.handler = async (event, context) => {
       <body>
           <h1>❌ 授权失败</h1>
           <div class="error">未收到授权码</div>
-          <p><a href="/api/feishu-verify">重新授权</a></p>
+          <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
       </body>
       </html>
       `;
@@ -113,32 +107,25 @@ exports.handler = async (event, context) => {
     // 使用授权码获取访问令牌
     console.log('开始获取访问令牌...');
     
-    const tokenPayload = {
-      grant_type: 'authorization_code',
-      app_id: FEISHU_APP_ID,
-      app_secret: FEISHU_APP_SECRET,
-      code: code,
-      redirect_uri: FEISHU_REDIRECT_URI
-    };
-    
     const tokenRequest = {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Accept': 'application/json'
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify(tokenPayload)
+      body: JSON.stringify({
+        grant_type: 'authorization_code',
+        client_id: FEISHU_APP_ID,
+        client_secret: FEISHU_APP_SECRET,
+        code: code,
+        redirect_uri: FEISHU_REDIRECT_URI
+      })
     };
 
-    console.log('Token请求参数:', JSON.stringify(tokenPayload, null, 2));
-    console.log('请求URL: https://open.feishu.cn/open-apis/authen/v1/oidc/access_token');
-    console.log('请求头:', tokenRequest.headers);
+    console.log('Token请求参数:', JSON.stringify(tokenRequest.body, null, 2));
 
-    const tokenResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/oidc/access_token', tokenRequest);
-    console.log('HTTP响应状态:', tokenResponse.status);
-    console.log('HTTP响应头:', Object.fromEntries(tokenResponse.headers.entries()));
-    
+    const tokenResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/access_token', tokenRequest);
     const tokenData = await tokenResponse.json();
+    
     console.log('Token响应:', JSON.stringify(tokenData, null, 2));
 
     if (tokenData.code === 0) {
@@ -301,7 +288,7 @@ exports.handler = async (event, context) => {
               <div>错误信息: ${tokenData.msg || '未知错误'}</div>
               <div class="details">详细信息: ${JSON.stringify(tokenData, null, 2)}</div>
           </div>
-          <p><a href="/api/feishu-verify">重新授权</a></p>
+          <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
       </body>
       </html>
       `;
@@ -331,7 +318,7 @@ exports.handler = async (event, context) => {
     <body>
         <h1>❌ 处理授权时出错</h1>
         <div class="error">错误信息: ${error.message}</div>
-        <p><a href="/api/feishu-verify">重新授权</a></p>
+        <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
     </body>
     </html>
     `;
