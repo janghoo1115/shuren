@@ -36,10 +36,16 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    // 飞书应用配置
+    // 飞书应用配置 - 使用最新的正确配置
     const FEISHU_APP_ID = "cli_a8c3c35f5230d00e";
     const FEISHU_APP_SECRET = "bAbJhKTOnzLyBxHwbK2hkgkRPFsPTRgw";
-         const FEISHU_REDIRECT_URI = "https://shurenai.xyz/.netlify/functions/feishu-callback";
+    const FEISHU_REDIRECT_URI = "https://shurenai.xyz/.netlify/functions/feishu-callback";
+    
+    console.log('使用配置:', {
+      app_id: FEISHU_APP_ID,
+      app_secret: FEISHU_APP_SECRET.substring(0, 10) + '...',
+      redirect_uri: FEISHU_REDIRECT_URI
+    });
 
     // 获取查询参数
     const { code, state, error } = event.queryStringParameters || {};
