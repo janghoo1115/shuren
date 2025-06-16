@@ -106,22 +106,20 @@ exports.handler = async (event, context) => {
 
     // 使用授权码获取访问令牌
     console.log('开始获取访问令牌...');
-    
-    const tokenRequestBody = {
-      grant_type: 'authorization_code',
-      code: code
-    };
-
-    console.log('Token请求参数:', JSON.stringify(tokenRequestBody, null, 2));
     console.log('使用App ID:', FEISHU_APP_ID);
+    console.log('授权码:', code);
 
-    const tokenResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/oidc/access_token', {
+    const tokenResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/access_token', {
       method: 'POST',
       headers: {
-        'Authorization': `Basic ${Buffer.from(`${FEISHU_APP_ID}:${FEISHU_APP_SECRET}`).toString('base64')}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(tokenRequestBody)
+      body: JSON.stringify({
+        grant_type: 'authorization_code',
+        code: code,
+        app_id: FEISHU_APP_ID,
+        app_secret: FEISHU_APP_SECRET
+      })
     });
     const tokenData = await tokenResponse.json();
     
