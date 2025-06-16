@@ -113,25 +113,30 @@ exports.handler = async (event, context) => {
     // 使用授权码获取访问令牌
     console.log('开始获取访问令牌...');
     
+    const tokenPayload = {
+      grant_type: 'authorization_code',
+      app_id: FEISHU_APP_ID,
+      app_secret: FEISHU_APP_SECRET,
+      code: code,
+      redirect_uri: FEISHU_REDIRECT_URI
+    };
+    
     const tokenRequest = {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json; charset=utf-8',
+        'Accept': 'application/json'
       },
-      body: JSON.stringify({
-        grant_type: 'authorization_code',
-        app_id: FEISHU_APP_ID,
-        app_secret: FEISHU_APP_SECRET,
-        code: code,
-        redirect_uri: FEISHU_REDIRECT_URI
-      })
+      body: JSON.stringify(tokenPayload)
     };
 
-    console.log('Token请求参数:', JSON.stringify(tokenRequest.body, null, 2));
+    console.log('Token请求参数:', JSON.stringify(tokenPayload, null, 2));
     console.log('请求URL: https://open.feishu.cn/open-apis/authen/v1/oidc/access_token');
+    console.log('请求头:', tokenRequest.headers);
 
     const tokenResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/oidc/access_token', tokenRequest);
     console.log('HTTP响应状态:', tokenResponse.status);
+    console.log('HTTP响应头:', Object.fromEntries(tokenResponse.headers.entries()));
     
     const tokenData = await tokenResponse.json();
     console.log('Token响应:', JSON.stringify(tokenData, null, 2));
