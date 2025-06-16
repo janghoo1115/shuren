@@ -1,10 +1,9 @@
 /**
  * 飞书OAuth授权回调处理函数
- * 处理用户授权后的回调，获取访问令牌
+ * 处理用户授权后的回调，获取访问令牌并自动创建文档
  */
 exports.handler = async (event, context) => {
-  console.log('飞书授权回调请求:', event.httpMethod);
-  console.log('查询参数:', event.queryStringParameters);
+  console.log('收到飞书OAuth回调:', event.httpMethod, event.queryStringParameters);
 
   // 设置CORS头
   const headers = {
@@ -42,73 +41,23 @@ exports.handler = async (event, context) => {
     const FEISHU_REDIRECT_URI = "https://shurenai.xyz/.netlify/functions/feishu-callback";
 
     // 获取查询参数
-    const { code, state, error } = event.queryStringParameters || {};
+    const { code, error, state } = event.queryStringParameters || {};
 
-    console.log('回调参数:', { code, state, error });
+    console.log('回调参数:', { code: code ? `${code.substring(0, 10)}...` : null, error, state });
 
-    // 检查是否有错误
+    // 处理错误情况
     if (error) {
-      const errorHtml = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-          <title>授权失败</title>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-              body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
-              .error { color: #d32f2f; background: #ffebee; padding: 20px; border-radius: 4px; margin: 20px 0; }
-          </style>
-      </head>
-      <body>
-          <h1>❌ 授权失败</h1>
-          <div class="error">错误信息: ${error}</div>
-          <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
-      </body>
-      </html>
-      `;
-      
-      return {
-        statusCode: 400,
-        headers,
-        body: errorHtml
-      };
+      return createErrorPage('授权失败', `错误信息: ${error}`, headers);
     }
 
     // 检查是否有授权码
     if (!code) {
-      const noCodeHtml = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-          <title>授权失败</title>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-              body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
-              .error { color: #d32f2f; background: #ffebee; padding: 20px; border-radius: 4px; margin: 20px 0; }
-          </style>
-      </head>
-      <body>
-          <h1>❌ 授权失败</h1>
-          <div class="error">未收到授权码</div>
-          <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
-      </body>
-      </html>
-      `;
-      
-      return {
-        statusCode: 400,
-        headers,
-        body: noCodeHtml
-      };
+      return createErrorPage('授权失败', '未收到授权码', headers);
     }
 
     // 使用授权码获取访问令牌
     console.log('开始获取访问令牌...');
-    console.log('使用App ID:', FEISHU_APP_ID);
-    console.log('授权码:', code);
-
+    
     const tokenResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/access_token', {
       method: 'POST',
       headers: {
@@ -121,209 +70,297 @@ exports.handler = async (event, context) => {
         app_secret: FEISHU_APP_SECRET
       })
     });
-    const tokenData = await tokenResponse.json();
     
+    const tokenData = await tokenResponse.json();
     console.log('Token响应:', JSON.stringify(tokenData, null, 2));
 
-    if (tokenData.code === 0) {
-      const accessToken = tokenData.data.access_token;
-      const refreshToken = tokenData.data.refresh_token;
-      const expiresIn = tokenData.data.expires_in;
-      
-      console.log('获取访问令牌成功');
+    if (tokenData.code !== 0) {
+      return createErrorPage(
+        '获取访问令牌失败', 
+        `错误代码: ${tokenData.code}<br>错误信息: ${tokenData.msg || '未知错误'}`, 
+        headers
+      );
+    }
 
-      const successHtml = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-          <title>授权成功</title>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-              body {
-                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-                  max-width: 800px;
-                  margin: 50px auto;
-                  padding: 20px;
-                  background-color: #f5f5f5;
-                  line-height: 1.6;
-              }
-              .container {
-                  background: white;
-                  padding: 40px;
-                  border-radius: 8px;
-                  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-              }
-              .success {
-                  color: #2e7d32;
-                  background: #e8f5e8;
-                  padding: 20px;
-                  border-radius: 4px;
-                  margin: 20px 0;
-                  text-align: center;
-              }
-              .token-box {
-                  background: #f8f9fa;
-                  border: 1px solid #dee2e6;
-                  border-radius: 4px;
-                  padding: 15px;
-                  margin: 15px 0;
-                  font-family: monospace;
-                  font-size: 12px;
-                  word-break: break-all;
-                  max-height: 150px;
-                  overflow-y: auto;
-              }
-              .copy-btn {
-                  background-color: #007bff;
-                  color: white;
-                  border: none;
-                  padding: 8px 16px;
-                  border-radius: 4px;
-                  cursor: pointer;
-                  margin: 5px;
-              }
-              .copy-btn:hover {
-                  background-color: #0056b3;
-              }
-              .instructions {
-                  background-color: #fff3cd;
-                  border: 1px solid #ffeaa7;
-                  border-radius: 4px;
-                  padding: 15px;
-                  margin: 20px 0;
-              }
-              h1 { color: #333; text-align: center; }
-              h3 { color: #495057; margin-top: 25px; }
-          </style>
-      </head>
-      <body>
-          <div class="container">
-              <h1>🎉 授权成功！</h1>
-              <div class="success">
-                  您已成功授权飞书文档访问权限！
-              </div>
-              
-              <div class="instructions">
-                  <strong>📋 接下来的步骤：</strong>
-                  <ol>
-                      <li>复制下面的访问令牌</li>
-                      <li>在您的本地项目中设置环境变量</li>
-                      <li>运行测试脚本验证文档创建功能</li>
-                  </ol>
-              </div>
+    const accessToken = tokenData.data.access_token;
+    console.log('获取访问令牌成功');
 
-              <h3>🔑 访问令牌 (Access Token):</h3>
-              <div class="token-box" id="accessToken">${accessToken}</div>
-              <button class="copy-btn" onclick="copyToken('accessToken')">复制访问令牌</button>
+    // 获取用户信息
+    const userInfo = await getUserInfo(accessToken);
+    
+    // 自动创建文档
+    const createResult = await createDocument(accessToken, userInfo.name || '用户');
 
-              <h3>🔄 刷新令牌 (Refresh Token):</h3>
-              <div class="token-box" id="refreshToken">${refreshToken}</div>
-              <button class="copy-btn" onclick="copyToken('refreshToken')">复制刷新令牌</button>
-
-              <h3>⏰ 令牌有效期:</h3>
-              <p>访问令牌将在 ${expiresIn} 秒后过期 (约 ${Math.round(expiresIn / 3600)} 小时)</p>
-
-              <div class="instructions">
-                  <strong>💡 使用说明：</strong>
-                  <br>请在您的 <code>.env</code> 文件中设置：
-                  <br><code>FEISHU_USER_ACCESS_TOKEN=${accessToken}</code>
-                  <br>然后运行您的测试脚本来创建飞书文档。
-              </div>
-          </div>
-
-          <script>
-              function copyToken(elementId) {
-                  const element = document.getElementById(elementId);
-                  const text = element.textContent;
-                  
-                  navigator.clipboard.writeText(text).then(function() {
-                      const btn = event.target;
-                      const originalText = btn.textContent;
-                      btn.textContent = '✅ 已复制';
-                      btn.style.backgroundColor = '#28a745';
-                      
-                      setTimeout(function() {
-                          btn.textContent = originalText;
-                          btn.style.backgroundColor = '#007bff';
-                      }, 2000);
-                  }).catch(function(err) {
-                      alert('复制失败，请手动复制令牌');
-                  });
-              }
-          </script>
-      </body>
-      </html>
-      `;
-
-      return {
-        statusCode: 200,
-        headers,
-        body: successHtml
-      };
-
+    if (createResult.success) {
+      return createSuccessPage(userInfo, createResult, headers);
     } else {
-      console.error('获取令牌失败:', tokenData);
-      
-      const tokenErrorHtml = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-          <title>获取令牌失败</title>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-              body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
-              .error { color: #d32f2f; background: #ffebee; padding: 20px; border-radius: 4px; margin: 20px 0; }
-              .details { font-family: monospace; font-size: 12px; text-align: left; }
-          </style>
-      </head>
-      <body>
-          <h1>❌ 获取令牌失败</h1>
-          <div class="error">
-              <div>错误代码: ${tokenData.code}</div>
-              <div>错误信息: ${tokenData.msg || '未知错误'}</div>
-              <div class="details">详细信息: ${JSON.stringify(tokenData, null, 2)}</div>
-          </div>
-          <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
-      </body>
-      </html>
-      `;
-
-      return {
-        statusCode: 400,
-        headers,
-        body: tokenErrorHtml
-      };
+      return createErrorPage('文档创建失败', createResult.error, headers);
     }
 
   } catch (error) {
-    console.error('处理回调时发生错误:', error);
-    
-    const serverErrorHtml = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>服务器错误</title>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
-            .error { color: #d32f2f; background: #ffebee; padding: 20px; border-radius: 4px; margin: 20px 0; }
-        </style>
-    </head>
-    <body>
-        <h1>❌ 处理授权时出错</h1>
-        <div class="error">错误信息: ${error.message}</div>
-        <p><a href="/.netlify/functions/feishu-verify">重新授权</a></p>
-    </body>
-    </html>
-    `;
-
-    return {
-      statusCode: 500,
-      headers,
-      body: serverErrorHtml
-    };
+    console.error('处理OAuth回调时发生错误:', error);
+    return createErrorPage('服务器错误', '处理授权回调时发生错误，请稍后重试。', headers);
   }
-}; 
+};
+
+/**
+ * 获取用户信息
+ */
+async function getUserInfo(accessToken) {
+  try {
+    const response = await fetch('https://open.feishu.cn/open-apis/authen/v1/user_info', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const data = await response.json();
+    if (data.code === 0) {
+      return data.data;
+    } else {
+      console.error('获取用户信息失败:', data);
+      return { name: '用户' };
+    }
+  } catch (error) {
+    console.error('获取用户信息异常:', error);
+    return { name: '用户' };
+  }
+}
+
+/**
+ * 创建飞书文档
+ */
+async function createDocument(accessToken, userName) {
+  try {
+    // 1. 创建文档
+    const createResponse = await fetch('https://open.feishu.cn/open-apis/docx/v1/documents', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        title: `${userName}的数刃AI测试文档`,
+        folder_token: ""
+      })
+    });
+
+    const createData = await createResponse.json();
+    console.log('创建文档响应:', JSON.stringify(createData, null, 2));
+
+    if (createData.code !== 0) {
+      return { success: false, error: `创建文档失败: ${createData.msg}` };
+    }
+
+    const documentId = createData.data.document.document_id;
+    const documentTitle = createData.data.document.title;
+
+    // 2. 添加文档内容
+    const contentResponse = await fetch(
+      `https://open.feishu.cn/open-apis/docx/v1/documents/${documentId}/blocks/${documentId}/children`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          children: [
+            {
+              block_type: 2, // 文本块
+              text: {
+                elements: [
+                  {
+                    text_run: {
+                      content: `🎉 恭喜 ${userName}！\n\n这是通过数刃AI系统自动创建的飞书文档。\n\n✅ OAuth授权成功\n✅ 文档创建成功\n✅ 内容添加成功\n\n现在您可以在飞书中找到这个文档并进行编辑。\n\n感谢您体验数刃AI的飞书集成功能！`,
+                      text_element_style: {}
+                    }
+                  }
+                ],
+                style: {}
+              }
+            }
+          ],
+          index: 0
+        })
+      }
+    );
+
+    const contentData = await contentResponse.json();
+    console.log('添加内容响应:', JSON.stringify(contentData, null, 2));
+
+    if (contentData.code === 0) {
+      return {
+        success: true,
+        documentId: documentId,
+        title: documentTitle,
+        url: `https://bytedance.feishu.cn/docx/${documentId}`
+      };
+    } else {
+      return { success: false, error: `添加文档内容失败: ${contentData.msg}` };
+    }
+
+  } catch (error) {
+    console.error('创建文档异常:', error);
+    return { success: false, error: `创建文档时发生异常: ${error.message}` };
+  }
+}
+
+/**
+ * 创建成功页面
+ */
+function createSuccessPage(userInfo, createResult, headers) {
+  const successHtml = `
+  <!DOCTYPE html>
+  <html>
+  <head>
+      <title>文档创建成功</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+          body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+              max-width: 600px;
+              margin: 50px auto;
+              padding: 20px;
+              background-color: #f5f5f5;
+              line-height: 1.6;
+          }
+          .container {
+              background: white;
+              padding: 40px;
+              border-radius: 12px;
+              box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+              text-align: center;
+          }
+          .success-icon {
+              font-size: 64px;
+              margin-bottom: 20px;
+          }
+          h1 {
+              color: #2e7d32;
+              margin-bottom: 20px;
+          }
+          .user-info {
+              background: #e8f5e8;
+              padding: 20px;
+              border-radius: 8px;
+              margin: 20px 0;
+          }
+          .document-info {
+              background: #f8f9fa;
+              border: 1px solid #dee2e6;
+              border-radius: 8px;
+              padding: 20px;
+              margin: 20px 0;
+              text-align: left;
+          }
+          .btn {
+              display: inline-block;
+              background-color: #00B96B;
+              color: white;
+              padding: 12px 24px;
+              text-decoration: none;
+              border-radius: 6px;
+              margin: 10px;
+              font-weight: 500;
+              transition: background-color 0.3s;
+          }
+          .btn:hover {
+              background-color: #009954;
+          }
+          .btn-secondary {
+              background-color: #6c757d;
+          }
+          .btn-secondary:hover {
+              background-color: #545b62;
+          }
+      </style>
+  </head>
+  <body>
+      <div class="container">
+          <div class="success-icon">🎉</div>
+          <h1>文档创建成功！</h1>
+          
+          <div class="user-info">
+              <strong>👤 用户信息</strong><br>
+              姓名: ${userInfo.name || '用户'}<br>
+              ${userInfo.email ? `邮箱: ${userInfo.email}<br>` : ''}
+          </div>
+          
+          <div class="document-info">
+              <strong>📄 文档信息</strong><br>
+              <strong>标题:</strong> ${createResult.title}<br>
+              <strong>文档ID:</strong> ${createResult.documentId}<br>
+              <strong>创建时间:</strong> ${new Date().toLocaleString('zh-CN')}
+          </div>
+          
+          <p>您的飞书文档已成功创建！现在可以在飞书中查看和编辑这个文档。</p>
+          
+          <a href="${createResult.url}" class="btn" target="_blank">📖 打开文档</a>
+          <a href="https://shurenai.xyz" class="btn btn-secondary">🏠 返回首页</a>
+      </div>
+  </body>
+  </html>
+  `;
+
+  return {
+    statusCode: 200,
+    headers,
+    body: successHtml
+  };
+}
+
+/**
+ * 创建错误页面
+ */
+function createErrorPage(title, message, headers) {
+  const errorHtml = `
+  <!DOCTYPE html>
+  <html>
+  <head>
+      <title>${title}</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+          body { 
+              font-family: Arial, sans-serif; 
+              max-width: 600px; 
+              margin: 50px auto; 
+              padding: 20px; 
+              text-align: center; 
+          }
+          .error { 
+              color: #d32f2f; 
+              background: #ffebee; 
+              padding: 20px; 
+              border-radius: 4px; 
+              margin: 20px 0; 
+          }
+          .btn {
+              display: inline-block;
+              background-color: #00B96B;
+              color: white;
+              padding: 12px 24px;
+              text-decoration: none;
+              border-radius: 6px;
+              margin: 10px;
+          }
+      </style>
+  </head>
+  <body>
+      <h1>❌ ${title}</h1>
+      <div class="error">${message}</div>
+      <a href="/.netlify/functions/feishu-verify" class="btn">🔄 重新授权</a>
+      <a href="https://shurenai.xyz" class="btn">🏠 返回首页</a>
+  </body>
+  </html>
+  `;
+
+  return {
+    statusCode: 400,
+    headers,
+    body: errorHtml
+  };
+}
