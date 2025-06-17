@@ -40,9 +40,16 @@ exports.handler = async (event, context) => {
     if (event.httpMethod === 'GET') {
       const { msg_signature, timestamp, nonce, echostr } = query;
       
-      console.log('验证URL请求:', { msg_signature, timestamp, nonce, echostr: echostr?.substring(0, 20) + '...' });
+      console.log('企微验证请求参数:', { 
+        msg_signature, 
+        timestamp, 
+        nonce, 
+        echostr: echostr?.substring(0, 20) + '...',
+        query_full: query
+      });
 
       if (!msg_signature || !timestamp || !nonce || !echostr) {
+        console.error('缺少必需参数:', { msg_signature: !!msg_signature, timestamp: !!timestamp, nonce: !!nonce, echostr: !!echostr });
         return {
           statusCode: 400,
           headers,
@@ -51,11 +58,17 @@ exports.handler = async (event, context) => {
       }
 
       try {
+        console.log('开始验证签名...');
+        
         // 验证签名
-        if (crypto.verifySignature(msg_signature, timestamp, nonce, echostr)) {
+        const isValidSignature = crypto.verifySignature(msg_signature, timestamp, nonce, echostr);
+        console.log('签名验证结果:', isValidSignature);
+        
+        if (isValidSignature) {
+          console.log('签名验证成功，开始解密echostr...');
           // 解密echostr
           const decryptedEchostr = crypto.decrypt(echostr);
-          console.log('URL验证成功');
+          console.log('URL验证成功，返回解密结果');
           return {
             statusCode: 200,
             headers: { 'Content-Type': 'text/plain' },
@@ -63,6 +76,17 @@ exports.handler = async (event, context) => {
           };
         } else {
           console.error('签名验证失败');
+          
+          // 添加调试信息：显示签名计算过程
+          const debugInfo = {
+            token: WECHAT_TOKEN,
+            timestamp,
+            nonce,
+            echostr_length: echostr.length,
+            expected_signature: msg_signature
+          };
+          console.log('签名验证调试信息:', debugInfo);
+          
           return {
             statusCode: 403,
             headers,
@@ -70,11 +94,11 @@ exports.handler = async (event, context) => {
           };
         }
       } catch (error) {
-        console.error('URL验证失败:', error);
+        console.error('URL验证异常:', error);
         return {
           statusCode: 500,
           headers,
-          body: 'Verification failed'
+          body: `Verification failed: ${error.message}`
         };
       }
     }
