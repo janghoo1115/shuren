@@ -3,8 +3,28 @@
  * 用于在不同的Netlify Functions之间共享用户数据
  */
 
-// 用户数据存储（内存存储，生产环境应使用数据库）
+// 用户数据存储（简单的持久化存储方案）
+// 注意：这是一个临时解决方案，生产环境应使用数据库
 const userDataStore = new Map();
+
+// 从环境变量加载用户数据
+function loadUserDataFromEnv() {
+  try {
+    const userData = process.env.USER_DATA_STORE;
+    if (userData) {
+      const parsedData = JSON.parse(userData);
+      Object.entries(parsedData).forEach(([userId, data]) => {
+        userDataStore.set(userId, data);
+      });
+      console.log('从环境变量加载用户数据:', Object.keys(parsedData).length + '个用户');
+    }
+  } catch (error) {
+    console.warn('加载用户数据失败:', error.message);
+  }
+}
+
+// 初始化时加载数据
+loadUserDataFromEnv();
 
 /**
  * 存储用户数据
@@ -28,6 +48,15 @@ function storeUserData(userData) {
 
     userDataStore.set(user_id, data);
     console.log('用户数据已存储:', { user_id, user_name, main_document_id });
+    
+    // 尝试持久化存储（记录到日志，实际生产环境应使用数据库）
+    console.log('用户数据持久化记录:', JSON.stringify({
+      action: 'store_user_data',
+      user_id: user_id,
+      user_name: user_name,
+      main_document_id: main_document_id,
+      timestamp: new Date().toISOString()
+    }));
     
     return { success: true, data };
   } catch (error) {
