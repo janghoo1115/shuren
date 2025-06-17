@@ -35,6 +35,12 @@ exports.handler = async (event, context) => {
         return storeUserDataAPI(requestBody, headers);
       case 'GET':
         const userId = queryStringParameters?.user_id;
+        const action = queryStringParameters?.action;
+        
+        if (action === 'list') {
+          return getAllUsersAPI(headers);
+        }
+        
         return getUserDataAPI(userId, headers);
       case 'PUT':
         return updateUserDataAPI(requestBody, headers);
@@ -212,6 +218,48 @@ function deleteUserDataAPI(userId, headers) {
       body: JSON.stringify({ 
         error: '删除用户数据失败', 
         message: error.message 
+      })
+    };
+  }
+}
+
+/**
+ * 获取所有用户数据API
+ */
+function getAllUsersAPI(headers) {
+  try {
+    const result = userStore.getAllUsers();
+    
+    if (result.success) {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          success: true,
+          data: result.data,
+          count: result.count,
+          message: `找到 ${result.count} 个用户`
+        })
+      };
+    } else {
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ 
+          error: result.error,
+          success: false
+        })
+      };
+    }
+  } catch (error) {
+    console.error('获取所有用户数据失败:', error);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ 
+        error: '获取所有用户数据失败', 
+        message: error.message,
+        success: false
       })
     };
   }
