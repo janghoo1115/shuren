@@ -33,8 +33,12 @@ function storeUserData(userData) {
   try {
     const { user_id, user_name, access_token, main_document_id } = userData;
     
-    if (!user_id || !access_token || !main_document_id) {
-      throw new Error('缺少必需参数');
+    if (!user_id || !access_token) {
+      throw new Error('缺少必需参数: user_id, access_token');
+    }
+    
+    if (!main_document_id) {
+      throw new Error('缺少必需参数: main_document_id');
     }
 
     const data = {
