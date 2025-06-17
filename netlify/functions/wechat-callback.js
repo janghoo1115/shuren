@@ -96,6 +96,19 @@ exports.handler = async (event, context) => {
         const xmlData = await parseXML(event.body);
         const encryptedMsg = xmlData.xml.Encrypt[0];
         
+        // 检查AgentID（如果有的话）
+        const agentId = xmlData.xml.AgentID ? xmlData.xml.AgentID[0] : null;
+        const TARGET_AGENT_ID = process.env.TARGET_AGENT_ID;
+        
+        if (TARGET_AGENT_ID && agentId && agentId !== TARGET_AGENT_ID) {
+          console.log(`消息来自其他应用 AgentID: ${agentId}，跳过处理`);
+          return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'text/plain' },
+            body: 'success'
+          };
+        }
+        
         // 验证签名
         if (!crypto.verifySignature(msg_signature, timestamp, nonce, encryptedMsg)) {
           console.error('消息签名验证失败');
@@ -116,6 +129,21 @@ exports.handler = async (event, context) => {
         const msgType = msgData.xml.MsgType[0];
         const fromUser = msgData.xml.FromUserName[0];
         const toUser = msgData.xml.ToUserName[0];
+        
+        // 指定要处理消息的客服账号ID（需要在环境变量中配置）
+        const TARGET_CUSTOMER_SERVICE = process.env.TARGET_CUSTOMER_SERVICE || 'your_target_userid';
+        
+        // 只处理发送给指定客服的消息
+        if (toUser !== TARGET_CUSTOMER_SERVICE) {
+          console.log(`消息发送给了其他客服 ${toUser}，跳过处理`);
+          return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'text/plain' },
+            body: 'success'
+          };
+        }
+        
+        console.log(`处理发送给目标客服 ${TARGET_CUSTOMER_SERVICE} 的消息`);
 
         if (msgType === 'text') {
           const content = msgData.xml.Content[0];
