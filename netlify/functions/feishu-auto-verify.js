@@ -24,8 +24,8 @@ exports.handler = async (event, context) => {
 
   try {
     // 飞书应用配置
-    const FEISHU_APP_ID = "cli_a8c3c35f5230d00e";
-    const FEISHU_REDIRECT_URI = "https://shurenai.xyz/.netlify/functions/feishu-callback";
+    const FEISHU_APP_ID = process.env.FEISHU_APP_ID || "cli_a8c3c35f5230d00e";
+    const FEISHU_REDIRECT_URI = "https://shurenai.xyz/.netlify/functions/feishu-auto-create";
     const FEISHU_SCOPE = "drive:drive";
 
     // 生成状态参数（可选，用于防CSRF）
