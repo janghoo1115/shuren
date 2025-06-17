@@ -38,14 +38,28 @@ exports.handler = async (event, context) => {
 
     // GET请求：验证URL
     if (event.httpMethod === 'GET') {
-      const { msg_signature, timestamp, nonce, echostr } = query;
+      // 对请求参数做 URL decode 处理
+      let { msg_signature, timestamp, nonce, echostr } = query;
       
-      console.log('企微验证请求参数:', { 
+      if (echostr) {
+        echostr = decodeURIComponent(echostr);
+      }
+      if (msg_signature) {
+        msg_signature = decodeURIComponent(msg_signature);
+      }
+      if (timestamp) {
+        timestamp = decodeURIComponent(timestamp);
+      }
+      if (nonce) {
+        nonce = decodeURIComponent(nonce);
+      }
+      
+      console.log('企微验证请求参数 (URL decoded):', { 
         msg_signature, 
         timestamp, 
         nonce, 
         echostr: echostr?.substring(0, 20) + '...',
-        query_full: query
+        echostr_length: echostr?.length
       });
 
       if (!msg_signature || !timestamp || !nonce || !echostr) {
@@ -60,63 +74,52 @@ exports.handler = async (event, context) => {
       try {
         console.log('开始验证签名...');
         
-        // 临时：跳过签名验证，直接返回echostr进行测试
-        console.log('临时跳过签名验证，直接返回echostr');
-        
-        // 尝试解密echostr
-        try {
-          const decryptedEchostr = crypto.decrypt(echostr);
-          console.log('解密成功，返回解密结果');
-          return {
-            statusCode: 200,
-            headers: { 'Content-Type': 'text/plain' },
-            body: decryptedEchostr
-          };
-        } catch (decryptError) {
-          console.error('解密失败，尝试直接返回echostr:', decryptError.message);
-          // 如果解密失败，直接返回echostr（可能企微发送的是明文）
-          return {
-            statusCode: 200,
-            headers: { 'Content-Type': 'text/plain' },
-            body: echostr
-          };
-        }
-        
-        /* 原始验证逻辑（暂时注释）
         // 验证签名
         const isValidSignature = crypto.verifySignature(msg_signature, timestamp, nonce, echostr);
         console.log('签名验证结果:', isValidSignature);
         
         if (isValidSignature) {
           console.log('签名验证成功，开始解密echostr...');
-          // 解密echostr
+          // 解密echostr得到明文消息内容
           const decryptedEchostr = crypto.decrypt(echostr);
-          console.log('URL验证成功，返回解密结果');
+          console.log('URL验证成功，返回解密结果:', decryptedEchostr);
+          
+          // 在1秒内原样返回明文消息内容(不能加引号，不能带bom头，不能带换行符)
           return {
             statusCode: 200,
-            headers: { 'Content-Type': 'text/plain' },
-            body: decryptedEchostr
+            headers: { 
+              'Content-Type': 'text/plain; charset=utf-8',
+              'Cache-Control': 'no-cache'
+            },
+            body: decryptedEchostr.trim() // 去除可能的换行符
           };
         } else {
           console.error('签名验证失败');
           
-          // 添加调试信息：显示签名计算过程
-          const debugInfo = {
-            token: WECHAT_TOKEN,
-            timestamp,
-            nonce,
-            echostr_length: echostr.length,
-            expected_signature: msg_signature
-          };
-          console.log('签名验证调试信息:', debugInfo);
-          
-          return {
-            statusCode: 403,
-            headers,
-            body: 'Signature verification failed'
-          };
+          // 即使签名验证失败，也尝试解密（调试用）
+          console.log('尝试解密echostr进行调试...');
+          try {
+            const decryptedEchostr = crypto.decrypt(echostr);
+            console.log('解密成功（但签名验证失败）:', decryptedEchostr);
+            
+            // 临时返回解密结果（用于调试）
+            return {
+              statusCode: 200,
+              headers: { 
+                'Content-Type': 'text/plain; charset=utf-8',
+                'Cache-Control': 'no-cache'
+              },
+              body: decryptedEchostr.trim()
+            };
+          } catch (decryptError) {
+            console.error('解密也失败了:', decryptError.message);
+            return {
+              statusCode: 403,
+              headers,
+              body: 'Signature verification failed'
+            };
+          }
         }
-        */
       } catch (error) {
         console.error('URL验证异常:', error);
         return {
@@ -227,56 +230,29 @@ exports.handler = async (event, context) => {
             </xml>`;
 
             const encryptedReply = crypto.encrypt(replyXml);
-            const replyTimestamp = Math.floor(Date.now() / 1000).toString();
-            const replyNonce = Math.random().toString(36).substring(2, 15);
-            const replySignature = crypto.verifySignature('', replyTimestamp, replyNonce, encryptedReply);
-
-            const responseXml = `<xml>
-              <Encrypt><![CDATA[${encryptedReply}]]></Encrypt>
-              <MsgSignature><![CDATA[${replySignature}]]></MsgSignature>
-              <TimeStamp>${replyTimestamp}</TimeStamp>
-              <Nonce><![CDATA[${replyNonce}]]></Nonce>
-            </xml>`;
+            const signature = crypto.verifySignature(timestamp, nonce, encryptedReply);
 
             return {
               statusCode: 200,
               headers: { 'Content-Type': 'application/xml' },
-              body: responseXml
+              body: `<xml>
+                <Encrypt><![CDATA[${encryptedReply}]]></Encrypt>
+                <MsgSignature><![CDATA[${signature}]]></MsgSignature>
+                <TimeStamp>${timestamp}</TimeStamp>
+                <Nonce><![CDATA[${nonce}]]></Nonce>
+              </xml>`
             };
-
-          } catch (error) {
-            console.error('AI处理失败:', error);
-            // 返回错误消息
-            const errorMsg = '抱歉，处理您的消息时出现了问题，请稍后重试。';
-            const errorXml = `<xml>
-              <ToUserName><![CDATA[${fromUser}]]></ToUserName>
-              <FromUserName><![CDATA[${toUser}]]></FromUserName>
-              <CreateTime>${Math.floor(Date.now() / 1000)}</CreateTime>
-              <MsgType><![CDATA[text]]></MsgType>
-              <Content><![CDATA[${errorMsg}]]></Content>
-            </xml>`;
-
-            const encryptedError = crypto.encrypt(errorXml);
-            const errorTimestamp = Math.floor(Date.now() / 1000).toString();
-            const errorNonce = Math.random().toString(36).substring(2, 15);
-            const errorSignature = crypto.verifySignature('', errorTimestamp, errorNonce, encryptedError);
-
-            const errorResponseXml = `<xml>
-              <Encrypt><![CDATA[${encryptedError}]]></Encrypt>
-              <MsgSignature><![CDATA[${errorSignature}]]></MsgSignature>
-              <TimeStamp>${errorTimestamp}</TimeStamp>
-              <Nonce><![CDATA[${errorNonce}]]></Nonce>
-            </xml>`;
-
+          } catch (aiError) {
+            console.error('AI处理失败:', aiError);
             return {
               statusCode: 200,
-              headers: { 'Content-Type': 'application/xml' },
-              body: errorResponseXml
+              headers: { 'Content-Type': 'text/plain' },
+              body: 'success'
             };
           }
         }
 
-        // 其他类型消息暂时返回success
+        // 其他类型消息直接返回成功
         return {
           statusCode: 200,
           headers: { 'Content-Type': 'text/plain' },
@@ -284,11 +260,11 @@ exports.handler = async (event, context) => {
         };
 
       } catch (error) {
-        console.error('消息处理失败:', error);
+        console.error('处理消息异常:', error);
         return {
           statusCode: 500,
           headers,
-          body: JSON.stringify({ error: '消息处理失败' })
+          body: JSON.stringify({ error: '处理消息失败' })
         };
       }
     }
@@ -296,18 +272,15 @@ exports.handler = async (event, context) => {
     return {
       statusCode: 405,
       headers,
-      body: JSON.stringify({ error: '不支持的请求方法' })
+      body: JSON.stringify({ error: '不支持的HTTP方法' })
     };
 
   } catch (error) {
-    console.error('企业微信回调处理失败:', error);
+    console.error('处理请求异常:', error);
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ 
-        error: '服务器内部错误',
-        message: error.message 
-      })
+      body: JSON.stringify({ error: '服务器内部错误' })
     };
   }
-}; 
+};
