@@ -53,14 +53,24 @@ function storeUserData(userData) {
     userDataStore.set(user_id, data);
     console.log('用户数据已存储:', { user_id, user_name, main_document_id });
     
-    // 尝试持久化存储（记录到日志，实际生产环境应使用数据库）
-    console.log('用户数据持久化记录:', JSON.stringify({
+    // 持久化存储：将用户数据写入特殊的日志格式，便于检索
+    console.log('PERSISTENT_USER_DATA:', JSON.stringify({
       action: 'store_user_data',
       user_id: user_id,
       user_name: user_name,
+      access_token: access_token.substring(0, 10) + '...', // 只记录token前缀
       main_document_id: main_document_id,
       timestamp: new Date().toISOString()
     }));
+    
+    // 同时尝试通过全局对象保存（虽然有限，但比纯内存好一些）
+    if (typeof global !== 'undefined') {
+      if (!global.userDataBackup) {
+        global.userDataBackup = new Map();
+      }
+      global.userDataBackup.set(user_id, data);
+      console.log('用户数据已备份到全局对象');
+    }
     
     return { success: true, data };
   } catch (error) {
@@ -78,9 +88,19 @@ function getUserData(userId) {
       return { success: false, error: '缺少user_id参数' };
     }
 
-    const userData = userDataStore.get(userId);
+    let userData = userDataStore.get(userId);
+    
+    // 如果内存中没有数据，尝试从全局备份中恢复
+    if (!userData && typeof global !== 'undefined' && global.userDataBackup) {
+      userData = global.userDataBackup.get(userId);
+      if (userData) {
+        userDataStore.set(userId, userData);
+        console.log('从全局备份恢复用户数据:', userId);
+      }
+    }
     
     if (!userData) {
+      console.log('用户数据查找失败:', userId, '当前存储的用户:', Array.from(userDataStore.keys()));
       return { 
         success: false, 
         error: '用户数据未找到',
