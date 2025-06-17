@@ -12,12 +12,24 @@ class WeChatCrypto {
   }
 
   /**
-   * 验证签名
+   * 验证签名 - 企业微信官方规范
+   * msg_signature结合了企业填写的token、请求中的timestamp、nonce参数、加密的消息体
    */
-  verifySignature(signature, timestamp, nonce, echostr = '') {
-    const tmpArr = [this.token, timestamp, nonce, echostr].sort();
+  verifySignature(signature, timestamp, nonce, encrypt = '') {
+    const tmpArr = [this.token, timestamp, nonce, encrypt].sort();
     const tmpStr = tmpArr.join('');
     const hash = crypto.createHash('sha1').update(tmpStr).digest('hex');
+    console.log('签名验证详情:', {
+      token: this.token,
+      timestamp,
+      nonce,
+      encrypt_length: encrypt.length,
+      sorted_array: tmpArr,
+      joined_string: tmpStr,
+      calculated_hash: hash,
+      expected_signature: signature,
+      match: hash === signature
+    });
     return hash === signature;
   }
 
