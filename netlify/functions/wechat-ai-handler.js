@@ -110,13 +110,36 @@ exports.handler = async (event, context) => {
         console.log('为测试用户创建了默认授权数据');
       } else {
         console.log('创建测试用户数据失败:', storeResult.error);
+        
+        // 如果无法创建测试用户数据，我们仍然可以处理消息，只是不创建飞书文档
+        console.log('将在无飞书集成模式下处理用户消息');
+        
+        // 调用豆包API进行内容总结
+        const aiSummary = await callDoubaoAPI(user_content);
+        
         return {
-          statusCode: 404,
+          statusCode: 200,
           headers,
-          body: JSON.stringify({ 
-            error: '用户未授权',
-            message: '请先完成飞书授权',
-            debug: '无法创建测试用户数据: ' + storeResult.error
+          body: JSON.stringify({
+            success: true,
+            message: '消息已收到并处理（无飞书集成模式）',
+            status: 'success',
+            ai_summary: aiSummary.success ? aiSummary.content : '消息已收到: ' + user_content,
+            document_title: '消息处理结果',
+            document_url: '暂无（需要完成飞书授权）',
+            data: {
+              user_id: user_id,
+              user_name: user_name,
+              original_content: user_content,
+              ai_summary: aiSummary.success ? aiSummary.content : '消息已收到: ' + user_content,
+              processing_time: new Date().toISOString(),
+              mode: 'no_feishu_integration'
+            },
+            details: {
+              ai_processing: aiSummary.success ? '成功' : '失败',
+              document_creation: '跳过（需要飞书授权）',
+              main_document_update: '跳过（需要飞书授权）'
+            }
           })
         };
       }
