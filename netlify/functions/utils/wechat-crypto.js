@@ -22,22 +22,23 @@ class WeChatCrypto {
   }
 
   /**
-   * 解密消息
+   * 解密消息 - 按照企业微信官方规范
+   * 格式：random(16字节) + msg_len(4字节) + msg + $CorpId
    */
   decrypt(encryptedMsg) {
     try {
       console.log('开始解密，原始数据长度:', encryptedMsg.length);
       
-      const cipher = Buffer.from(encryptedMsg, 'base64');
-      console.log('Base64解码后长度:', cipher.length);
+      // Base64解码
+      const encryptedData = Buffer.from(encryptedMsg, 'base64');
+      console.log('Base64解码后长度:', encryptedData.length);
       
-      if (cipher.length < 16) {
+      if (encryptedData.length < 32) { // 至少需要32字节（16字节IV + 16字节最小数据）
         throw new Error('加密数据长度不足');
       }
       
-      const iv = cipher.slice(0, 16);
-      const encryptedData = cipher.slice(16);
-      
+      // 使用AES-256-CBC解密，IV为key的前16字节
+      const iv = this.key.slice(0, 16);
       const decipher = crypto.createDecipheriv('aes-256-cbc', this.key, iv);
       decipher.setAutoPadding(false);
       
@@ -48,40 +49,58 @@ class WeChatCrypto {
         throw new Error('解密后数据为空');
       }
       
-      // 去除填充
+      // 去除PKCS7填充
       const pad = decrypted[decrypted.length - 1];
-      if (pad > 32 || pad > decrypted.length) {
-        console.log('填充值异常，跳过填充处理');
+      console.log('填充字节值:', pad);
+      
+      if (pad > 0 && pad <= 32 && pad <= decrypted.length) {
+        // 验证填充是否正确
+        let validPadding = true;
+        for (let i = decrypted.length - pad; i < decrypted.length; i++) {
+          if (decrypted[i] !== pad) {
+            validPadding = false;
+            break;
+          }
+        }
+        
+        if (validPadding) {
+          decrypted = decrypted.slice(0, decrypted.length - pad);
+          console.log('去除填充后数据长度:', decrypted.length);
+        } else {
+          console.log('填充验证失败，保持原数据');
+        }
       } else {
-        decrypted = decrypted.slice(0, decrypted.length - pad);
+        console.log('填充值异常，保持原数据');
       }
       
-      console.log('去除填充后数据长度:', decrypted.length);
-      
-      // 检查数据长度是否足够
+      // 按照企微格式解析：random(16) + msg_len(4) + msg + corpId
       if (decrypted.length < 20) {
-        console.log('数据长度不足，直接返回解密结果');
-        return decrypted.toString();
+        console.log('数据长度不足20字节，无法解析');
+        return decrypted.toString('utf8');
+      }
+      
+      // 跳过前16字节的随机数
+      const msgLenBuffer = decrypted.slice(16, 20);
+      const msgLen = msgLenBuffer.readUInt32BE(0);
+      console.log('消息长度:', msgLen);
+      
+      if (msgLen <= 0 || msgLen > decrypted.length - 20) {
+        console.log('消息长度异常，尝试直接返回去除随机数后的内容');
+        return decrypted.slice(16).toString('utf8');
       }
       
       // 提取消息内容
-      const msgLen = decrypted.readUInt32BE(16);
-      console.log('消息长度:', msgLen);
-      
-      if (20 + msgLen > decrypted.length) {
-        console.log('消息长度超出数据范围，直接返回解密结果');
-        return decrypted.toString();
-      }
-      
-      const msg = decrypted.slice(20, 20 + msgLen).toString();
-      const receivedCorpId = decrypted.slice(20 + msgLen).toString();
-      
+      const msg = decrypted.slice(20, 20 + msgLen).toString('utf8');
       console.log('提取的消息:', msg);
-      console.log('提取的CorpId:', receivedCorpId);
       
-      if (receivedCorpId !== this.corpId) {
-        console.log('CorpId不匹配，但仍返回消息内容');
-        // 不抛出错误，只是警告
+      // 提取CorpId（如果有的话）
+      if (20 + msgLen < decrypted.length) {
+        const receivedCorpId = decrypted.slice(20 + msgLen).toString('utf8');
+        console.log('提取的CorpId:', receivedCorpId);
+        
+        if (receivedCorpId !== this.corpId) {
+          console.log(`CorpId不匹配: 期望=${this.corpId}, 实际=${receivedCorpId}`);
+        }
       }
       
       return msg;
