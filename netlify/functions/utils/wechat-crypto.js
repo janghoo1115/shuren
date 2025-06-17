@@ -1,347 +1,146 @@
-const WeChatCrypto = require('./utils/wechat-crypto');
-const { parseXML } = require('./utils/xml-parser');
+const crypto = require('crypto');
 
-exports.handler = async (event, context) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Content-Type': 'application/json'
-  };
-
-  // 处理OPTIONS预检请求
-  if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers,
-      body: ''
-    };
+/**
+ * 企业微信消息加解密工具类
+ */
+class WeChatCrypto {
+  constructor(token, encodingAESKey, corpId) {
+    this.token = token;
+    this.encodingAESKey = encodingAESKey;
+    this.corpId = corpId;
+    this.key = Buffer.from(encodingAESKey + '=', 'base64');
   }
 
-  try {
-    // 企业微信配置
-    const WECHAT_TOKEN = process.env.WECHAT_TOKEN;
-    const WECHAT_ENCODING_AES_KEY = process.env.WECHAT_ENCODING_AES_KEY;
-    const WECHAT_CORP_ID = process.env.WECHAT_CORP_ID;
+  /**
+   * 验证签名
+   */
+  verifySignature(signature, timestamp, nonce, echostr = '') {
+    const tmpArr = [this.token, timestamp, nonce, echostr].sort();
+    const tmpStr = tmpArr.join('');
+    const hash = crypto.createHash('sha1').update(tmpStr).digest('hex');
+    return hash === signature;
+  }
 
-    if (!WECHAT_TOKEN || !WECHAT_ENCODING_AES_KEY || !WECHAT_CORP_ID) {
-      console.error('企业微信配置缺失');
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ error: '企业微信配置缺失' })
-      };
-    }
-
-    const crypto = new WeChatCrypto(WECHAT_TOKEN, WECHAT_ENCODING_AES_KEY, WECHAT_CORP_ID);
-    const query = event.queryStringParameters || {};
-
-    // GET请求：验证URL
-    if (event.httpMethod === 'GET') {
-      const { msg_signature, timestamp, nonce, echostr } = query;
+  /**
+   * 解密消息 - 按照企业微信官方规范
+   * 格式：random(16字节) + msg_len(4字节) + msg + $CorpId
+   */
+  decrypt(encryptedMsg) {
+    try {
+      console.log('开始解密，原始数据长度:', encryptedMsg.length);
       
-      console.log('企微验证请求参数:', { 
-        msg_signature, 
-        timestamp, 
-        nonce, 
-        echostr: echostr?.substring(0, 20) + '...',
-        query_full: query
-      });
-
-      if (!msg_signature || !timestamp || !nonce || !echostr) {
-        console.error('缺少必需参数:', { msg_signature: !!msg_signature, timestamp: !!timestamp, nonce: !!nonce, echostr: !!echostr });
-        return {
-          statusCode: 400,
-          headers,
-          body: 'Missing required parameters'
-        };
+      // Base64解码
+      const encryptedData = Buffer.from(encryptedMsg, 'base64');
+      console.log('Base64解码后长度:', encryptedData.length);
+      
+      if (encryptedData.length < 32) { // 至少需要32字节（16字节IV + 16字节最小数据）
+        throw new Error('加密数据长度不足');
       }
-
-      try {
-        console.log('开始验证签名...');
-        
-        // 验证签名
-        const isValidSignature = crypto.verifySignature(msg_signature, timestamp, nonce, echostr);
-        console.log('签名验证结果:', isValidSignature);
-        
-        if (isValidSignature) {
-          console.log('签名验证成功，开始解密echostr...');
-          // 解密echostr
-          const decryptedEchostr = crypto.decrypt(echostr);
-          console.log('URL验证成功，返回解密结果:', decryptedEchostr);
-          return {
-            statusCode: 200,
-            headers: { 
-              'Content-Type': 'text/plain',
-              'Cache-Control': 'no-cache'
-            },
-            body: decryptedEchostr
-          };
-        } else {
-          console.error('签名验证失败');
-          
-          // 即使签名验证失败，也尝试解密（调试用）
-          console.log('尝试解密echostr进行调试...');
-          try {
-            const decryptedEchostr = crypto.decrypt(echostr);
-            console.log('解密成功（但签名验证失败）:', decryptedEchostr);
-            
-            // 添加调试信息：显示签名计算过程
-            const debugInfo = {
-              token: WECHAT_TOKEN,
-              timestamp,
-              nonce,
-              echostr_length: echostr.length,
-              expected_signature: msg_signature,
-              decrypted_content: decryptedEchostr
-            };
-            console.log('签名验证调试信息:', debugInfo);
-            
-            // 临时返回解密结果（用于调试）
-            return {
-              statusCode: 200,
-              headers: { 
-                'Content-Type': 'text/plain',
-                'Cache-Control': 'no-cache'
-              },
-              body: decryptedEchostr
-            };
-          } catch (decryptError) {
-            console.error('解密也失败了:', decryptError.message);
-            return {
-              statusCode: 403,
-              headers,
-              body: 'Signature verification failed'
-            };
+      
+      // 使用AES-256-CBC解密，IV为key的前16字节
+      const iv = this.key.slice(0, 16);
+      const decipher = crypto.createDecipheriv('aes-256-cbc', this.key, iv);
+      decipher.setAutoPadding(false);
+      
+      let decrypted = Buffer.concat([decipher.update(encryptedData), decipher.final()]);
+      console.log('解密后数据长度:', decrypted.length);
+      
+      if (decrypted.length === 0) {
+        throw new Error('解密后数据为空');
+      }
+      
+      // 去除PKCS7填充
+      const pad = decrypted[decrypted.length - 1];
+      console.log('填充字节值:', pad);
+      
+      if (pad > 0 && pad <= 32 && pad <= decrypted.length) {
+        // 验证填充是否正确
+        let validPadding = true;
+        for (let i = decrypted.length - pad; i < decrypted.length; i++) {
+          if (decrypted[i] !== pad) {
+            validPadding = false;
+            break;
           }
         }
         
-        /* 原始验证逻辑（暂时注释）
-        // 验证签名
-        const isValidSignature = crypto.verifySignature(msg_signature, timestamp, nonce, echostr);
-        console.log('签名验证结果:', isValidSignature);
-        
-        if (isValidSignature) {
-          console.log('签名验证成功，开始解密echostr...');
-          // 解密echostr
-          const decryptedEchostr = crypto.decrypt(echostr);
-          console.log('URL验证成功，返回解密结果');
-          return {
-            statusCode: 200,
-            headers: { 'Content-Type': 'text/plain' },
-            body: decryptedEchostr
-          };
+        if (validPadding) {
+          decrypted = decrypted.slice(0, decrypted.length - pad);
+          console.log('去除填充后数据长度:', decrypted.length);
         } else {
-          console.error('签名验证失败');
-          
-          // 添加调试信息：显示签名计算过程
-          const debugInfo = {
-            token: WECHAT_TOKEN,
-            timestamp,
-            nonce,
-            echostr_length: echostr.length,
-            expected_signature: msg_signature
-          };
-          console.log('签名验证调试信息:', debugInfo);
-          
-          return {
-            statusCode: 403,
-            headers,
-            body: 'Signature verification failed'
-          };
+          console.log('填充验证失败，保持原数据');
         }
-        */
-      } catch (error) {
-        console.error('URL验证异常:', error);
-        return {
-          statusCode: 500,
-          headers,
-          body: `Verification failed: ${error.message}`
-        };
+      } else {
+        console.log('填充值异常，保持原数据');
       }
-    }
-
-    // POST请求：处理消息
-    if (event.httpMethod === 'POST') {
-      const { msg_signature, timestamp, nonce } = query;
       
-      if (!msg_signature || !timestamp || !nonce) {
-        return {
-          statusCode: 400,
-          headers,
-          body: JSON.stringify({ error: '缺少必需参数' })
-        };
+      // 按照企微格式解析：random(16) + msg_len(4) + msg + corpId
+      if (decrypted.length < 20) {
+        console.log('数据长度不足20字节，无法解析');
+        return decrypted.toString('utf8');
       }
-
-      try {
-        // 解析XML消息
-        const xmlData = await parseXML(event.body);
-        const encryptedMsg = xmlData.xml.Encrypt[0];
-        
-        // 检查AgentID（如果有的话）
-        const agentId = xmlData.xml.AgentID ? xmlData.xml.AgentID[0] : null;
-        const TARGET_AGENT_ID = process.env.TARGET_AGENT_ID;
-        
-        if (TARGET_AGENT_ID && agentId && agentId !== TARGET_AGENT_ID) {
-          console.log(`消息来自其他应用 AgentID: ${agentId}，跳过处理`);
-          return {
-            statusCode: 200,
-            headers: { 'Content-Type': 'text/plain' },
-            body: 'success'
-          };
-        }
-        
-        // 验证签名
-        if (!crypto.verifySignature(msg_signature, timestamp, nonce, encryptedMsg)) {
-          console.error('消息签名验证失败');
-          return {
-            statusCode: 403,
-            headers,
-            body: JSON.stringify({ error: '签名验证失败' })
-          };
-        }
-
-        // 解密消息
-        const decryptedMsg = crypto.decrypt(encryptedMsg);
-        const msgData = await parseXML(decryptedMsg);
-        
-        console.log('收到企业微信消息:', JSON.stringify(msgData, null, 2));
-
-        // 处理不同类型的消息
-        const msgType = msgData.xml.MsgType[0];
-        const fromUser = msgData.xml.FromUserName[0];
-        const toUser = msgData.xml.ToUserName[0];
-        
-        // 指定要处理消息的客服账号ID（需要在环境变量中配置）
-        const TARGET_CUSTOMER_SERVICE = process.env.TARGET_CUSTOMER_SERVICE || 'your_target_userid';
-        
-        // 只处理发送给指定客服的消息
-        if (toUser !== TARGET_CUSTOMER_SERVICE) {
-          console.log(`消息发送给了其他客服 ${toUser}，跳过处理`);
-          return {
-            statusCode: 200,
-            headers: { 'Content-Type': 'text/plain' },
-            body: 'success'
-          };
-        }
-        
-        console.log(`处理发送给目标客服 ${TARGET_CUSTOMER_SERVICE} 的消息`);
-
-        if (msgType === 'text') {
-          const content = msgData.xml.Content[0];
-          console.log(`收到文本消息 - 用户: ${fromUser}, 内容: ${content}`);
-
-          // 调用AI处理函数
-          try {
-            const aiResponse = await fetch(`${event.headers.host}/.netlify/functions/wechat-ai-handler`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                user_id: fromUser,
-                user_name: fromUser,
-                user_content: content
-              })
-            });
-
-            const aiResult = await aiResponse.json();
-            console.log('AI处理结果:', aiResult);
-
-            // 构造回复消息
-            const replyMsg = `✅ 已收到您的消息并处理完成！\n\n📝 创建的文档：${aiResult.document_title || '新文档'}\n🔗 文档链接：${aiResult.document_url || '处理中...'}`;
-            
-            // 加密回复消息
-            const replyXml = `<xml>
-              <ToUserName><![CDATA[${fromUser}]]></ToUserName>
-              <FromUserName><![CDATA[${toUser}]]></FromUserName>
-              <CreateTime>${Math.floor(Date.now() / 1000)}</CreateTime>
-              <MsgType><![CDATA[text]]></MsgType>
-              <Content><![CDATA[${replyMsg}]]></Content>
-            </xml>`;
-
-            const encryptedReply = crypto.encrypt(replyXml);
-            const replyTimestamp = Math.floor(Date.now() / 1000).toString();
-            const replyNonce = Math.random().toString(36).substring(2, 15);
-            const replySignature = crypto.verifySignature('', replyTimestamp, replyNonce, encryptedReply);
-
-            const responseXml = `<xml>
-              <Encrypt><![CDATA[${encryptedReply}]]></Encrypt>
-              <MsgSignature><![CDATA[${replySignature}]]></MsgSignature>
-              <TimeStamp>${replyTimestamp}</TimeStamp>
-              <Nonce><![CDATA[${replyNonce}]]></Nonce>
-            </xml>`;
-
-            return {
-              statusCode: 200,
-              headers: { 'Content-Type': 'application/xml' },
-              body: responseXml
-            };
-
-          } catch (error) {
-            console.error('AI处理失败:', error);
-            // 返回错误消息
-            const errorMsg = '抱歉，处理您的消息时出现了问题，请稍后重试。';
-            const errorXml = `<xml>
-              <ToUserName><![CDATA[${fromUser}]]></ToUserName>
-              <FromUserName><![CDATA[${toUser}]]></FromUserName>
-              <CreateTime>${Math.floor(Date.now() / 1000)}</CreateTime>
-              <MsgType><![CDATA[text]]></MsgType>
-              <Content><![CDATA[${errorMsg}]]></Content>
-            </xml>`;
-
-            const encryptedError = crypto.encrypt(errorXml);
-            const errorTimestamp = Math.floor(Date.now() / 1000).toString();
-            const errorNonce = Math.random().toString(36).substring(2, 15);
-            const errorSignature = crypto.verifySignature('', errorTimestamp, errorNonce, encryptedError);
-
-            const errorResponseXml = `<xml>
-              <Encrypt><![CDATA[${encryptedError}]]></Encrypt>
-              <MsgSignature><![CDATA[${errorSignature}]]></MsgSignature>
-              <TimeStamp>${errorTimestamp}</TimeStamp>
-              <Nonce><![CDATA[${errorNonce}]]></Nonce>
-            </xml>`;
-
-            return {
-              statusCode: 200,
-              headers: { 'Content-Type': 'application/xml' },
-              body: errorResponseXml
-            };
-          }
-        }
-
-        // 其他类型消息暂时返回success
-        return {
-          statusCode: 200,
-          headers: { 'Content-Type': 'text/plain' },
-          body: 'success'
-        };
-
-      } catch (error) {
-        console.error('消息处理失败:', error);
-        return {
-          statusCode: 500,
-          headers,
-          body: JSON.stringify({ error: '消息处理失败' })
-        };
+      
+      // 跳过前16字节的随机数
+      const msgLenBuffer = decrypted.slice(16, 20);
+      const msgLen = msgLenBuffer.readUInt32BE(0);
+      console.log('消息长度:', msgLen);
+      
+      if (msgLen <= 0 || msgLen > decrypted.length - 20) {
+        console.log('消息长度异常，尝试直接返回去除随机数后的内容');
+        return decrypted.slice(16).toString('utf8');
       }
+      
+      // 提取消息内容
+      const msg = decrypted.slice(20, 20 + msgLen).toString('utf8');
+      console.log('提取的消息:', msg);
+      
+      // 提取CorpId（如果有的话）
+      if (20 + msgLen < decrypted.length) {
+        const receivedCorpId = decrypted.slice(20 + msgLen).toString('utf8');
+        console.log('提取的CorpId:', receivedCorpId);
+        
+        if (receivedCorpId !== this.corpId) {
+          console.log(`CorpId不匹配: 期望=${this.corpId}, 实际=${receivedCorpId}`);
+        }
+      }
+      
+      return msg;
+    } catch (error) {
+      console.error('解密失败:', error);
+      console.error('错误堆栈:', error.stack);
+      throw error;
     }
-
-    return {
-      statusCode: 405,
-      headers,
-      body: JSON.stringify({ error: '不支持的请求方法' })
-    };
-
-  } catch (error) {
-    console.error('企业微信回调处理失败:', error);
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ 
-        error: '服务器内部错误',
-        message: error.message 
-      })
-    };
   }
-}; 
+
+  /**
+   * 加密消息
+   */
+  encrypt(msg) {
+    try {
+      const random = crypto.randomBytes(16);
+      const msgBuffer = Buffer.from(msg);
+      const msgLen = Buffer.alloc(4);
+      msgLen.writeUInt32BE(msgBuffer.length, 0);
+      const corpIdBuffer = Buffer.from(this.corpId);
+      
+      const content = Buffer.concat([random, msgLen, msgBuffer, corpIdBuffer]);
+      
+      // 添加PKCS7填充
+      const blockSize = 32;
+      const padLen = blockSize - (content.length % blockSize);
+      const padBuffer = Buffer.alloc(padLen, padLen);
+      const paddedContent = Buffer.concat([content, padBuffer]);
+      
+      const iv = this.key.slice(0, 16);
+      const cipher = crypto.createCipheriv('aes-256-cbc', this.key, iv);
+      cipher.setAutoPadding(false);
+      
+      const encrypted = Buffer.concat([cipher.update(paddedContent), cipher.final()]);
+      return Buffer.concat([iv, encrypted]).toString('base64');
+    } catch (error) {
+      console.error('加密失败:', error);
+      throw error;
+    }
+  }
+}
+
+module.exports = WeChatCrypto; 
