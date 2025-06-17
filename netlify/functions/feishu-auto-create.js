@@ -79,6 +79,21 @@ exports.handler = async (event, context) => {
     const userInfo = await getUserInfo(accessToken);
     console.log('用户信息:', userInfo.name);
     
+    // 先存储用户基本认证信息（确保即使文档创建失败也能保存用户数据）
+    console.log('开始存储用户认证信息...');
+    const basicStoreResult = userStore.storeUserData({
+      user_id: userInfo.open_id,
+      user_name: userInfo.name,
+      access_token: accessToken,
+      main_document_id: 'pending' // 临时标记，等文档创建成功后更新
+    });
+    
+    if (basicStoreResult.success) {
+      console.log('✅ 用户基本认证信息存储成功');
+    } else {
+      console.error('⚠️ 用户基本认证信息存储失败:', basicStoreResult.error);
+    }
+
     // 创建微信随心记主文档
     console.log('开始创建微信随心记主文档...');
     const createResult = await createMainDocument(accessToken, userInfo);
@@ -86,24 +101,22 @@ exports.handler = async (event, context) => {
     if (createResult.success) {
       console.log('✅ 微信随心记主文档创建成功:', createResult.documentId);
       
-      // 存储用户token和文档信息
-      const storeResult = userStore.storeUserData({
-        user_id: userInfo.open_id,
-        user_name: userInfo.name,
-        access_token: accessToken,
+      // 更新用户数据，添加文档ID
+      const updateResult = userStore.updateUserData(userInfo.open_id, {
         main_document_id: createResult.documentId
       });
       
-      if (storeResult.success) {
-        console.log('✅ 用户数据存储成功');
+      if (updateResult.success) {
+        console.log('✅ 用户文档ID更新成功');
       } else {
-        console.error('⚠️ 用户数据存储失败:', storeResult.error);
+        console.error('⚠️ 用户文档ID更新失败:', updateResult.error);
       }
       
       return createSuccessPage(userInfo, createResult, headers);
     } else {
       console.error('❌ 文档创建失败:', createResult.error);
-      return createErrorPage('文档创建失败', createResult.error, headers);
+      // 即使文档创建失败，用户认证信息已经保存，可以稍后重试创建文档
+      return createErrorPage('文档创建失败', createResult.error + '\n\n用户认证信息已保存，请稍后重试。', headers);
     }
 
   } catch (error) {
