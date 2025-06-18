@@ -10,6 +10,14 @@
   from = "/api/feishu-verify"
   to = "/.netlify/functions/feishu-verify"
   status = 200
+
+
+[[redirects]]
+  from = "/WW_verify_4VUv8nsax3Jl3ObL.txt"
+  to = "/WW_verify_4VUv8nsax3Jl3ObL.txt"
+  status = 200
+  force = true
+
 # 环境变量示例（实际部署时需要在Netlify后台配置）
 # FEISHU_APP_ID = "你的飞书应用ID"
 # FEISHU_APP_SECRET = "你的飞书应用密钥"
