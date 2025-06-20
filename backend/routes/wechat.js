@@ -399,4 +399,47 @@ router.post('/test-auto-reply', async (req, res) => {
   }
 });
 
+// 调试接口：查看最近的回调日志
+router.get('/debug/recent-callbacks', (req, res) => {
+  res.json({
+    message: '请查看服务器日志或使用Render Dashboard查看实时日志',
+    callback_url: 'https://backend.shurenai.xyz/api/wechat/callback',
+    status: '服务正常运行',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 验证企微配置
+router.get('/debug/config', (req, res) => {
+  res.json({
+    corpId: WECHAT_CONFIG.corpId ? '已配置' : '未配置',
+    agentId: WECHAT_CONFIG.agentId ? '已配置' : '未配置',
+    token: WECHAT_CONFIG.token ? '已配置' : '未配置',
+    encodingAESKey: WECHAT_CONFIG.encodingAESKey ? '已配置' : '未配置',
+    corpSecret: WECHAT_CONFIG.corpSecret ? '已配置' : '未配置',
+    callback_url: 'https://backend.shurenai.xyz/api/wechat/callback'
+  });
+});
+
+// 手动触发测试消息（用于测试）
+router.get('/debug/test-message/:userid', async (req, res) => {
+  try {
+    const userid = req.params.userid;
+    
+    // 模拟收到消息并触发自动回复
+    await sendAutoReply(userid);
+    
+    res.json({
+      success: true,
+      message: `已向用户 ${userid} 发送测试回复`,
+      content: '好的收到'
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: '测试消息发送失败',
+      details: error.message
+    });
+  }
+});
+
 module.exports = router; 
