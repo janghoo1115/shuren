@@ -124,7 +124,7 @@ router.get('/callback', async (req, res) => {
         'Authorization': `Bearer ${accessToken}`
       },
       body: JSON.stringify({
-        title: `数刃AI文档 - ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`
+        title: "微信随心记"
       })
     });
 
@@ -137,30 +137,7 @@ router.get('/callback', async (req, res) => {
 
     const docId = docData.data.document.document_id;
 
-    // 添加文档内容
-    await fetch(`https://open.feishu.cn/open-apis/docx/v1/documents/${docId}/blocks/${docId}/children`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`
-      },
-      body: JSON.stringify({
-        children: [
-          {
-            block_type: "text",
-            text: {
-              elements: [
-                {
-                  text_run: {
-                    content: "欢迎使用数刃AI！\n\n这是通过API自动创建的文档。\n\n功能特点：\n• 自动化文档创建\n• 企业微信集成\n• 智能内容管理\n\n感谢您的使用！"
-                  }
-                }
-              ]
-            }
-          }
-        ]
-      })
-    });
+    // 不添加任何内容，保持文档为空
 
     // 返回成功页面
     res.send(`
@@ -237,8 +214,8 @@ router.get('/callback', async (req, res) => {
       <body>
           <div class="container">
               <div class="success-icon">✓</div>
-              <h1 class="title">授权成功！</h1>
-              <p class="subtitle">文档已在您的飞书中自动创建<br/>文档ID: ${docId}</p>
+                             <h1 class="title">授权成功！</h1>
+               <p class="subtitle">"微信随心记"文档已在您的飞书中自动创建<br/>文档ID: ${docId}</p>
               <a href="https://feishu.cn" target="_blank" class="doc-link">前往飞书查看</a>
           </div>
       </body>
@@ -297,7 +274,7 @@ router.get('/auto-create', async (req, res) => {
         'Authorization': `Bearer ${accessToken}`
       },
       body: JSON.stringify({
-        title: `数刃AI自动文档 - ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`
+        title: "微信随心记"
       })
     });
 
@@ -309,30 +286,7 @@ router.get('/auto-create', async (req, res) => {
 
     const docId = docData.data.document.document_id;
 
-    // 添加文档内容
-    await fetch(`https://open.feishu.cn/open-apis/docx/v1/documents/${docId}/blocks/${docId}/children`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`
-      },
-      body: JSON.stringify({
-        children: [
-          {
-            block_type: "text",
-            text: {
-              elements: [
-                {
-                  text_run: {
-                    content: "🎉 恭喜！文档自动创建成功\n\n数刃AI为您提供：\n• 一键文档创建\n• 智能内容管理\n• 企业微信深度集成\n• 自动化工作流程\n\n开始您的智能办公之旅！"
-                  }
-                }
-              ]
-            }
-          }
-        ]
-      })
-    });
+    // 不添加任何内容，保持文档为空
 
     res.redirect(`https://shurenai.xyz?doc_id=${docId}&success=true`);
 
