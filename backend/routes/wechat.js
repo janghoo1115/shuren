@@ -1389,4 +1389,26 @@ router.get('/kf/test', (req, res) => {
   res.send(html);
 });
 
+// 检查服务器IP地址
+router.get('/check-ip', async (req, res) => {
+  try {
+    // 通过外部服务获取服务器出站IP
+    const fetch = require('node-fetch');
+    const response = await fetch('https://httpbin.org/ip');
+    const data = await response.json();
+    
+    res.json({
+      success: true,
+      server_ip: data.origin,
+      timestamp: new Date().toISOString(),
+      message: '请将此IP添加到企业微信应用的可信IP列表中'
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: '获取IP失败',
+      message: error.message
+    });
+  }
+});
+
 module.exports = router; 
