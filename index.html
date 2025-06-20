@@ -152,15 +152,15 @@
         
         <div style="margin-top: 3rem;">
             <h3>🧪 体验演示功能</h3>
-            <a href="/.netlify/functions/feishu-verify" class="cta-button">开发者测试</a>
-            <a href="/.netlify/functions/feishu-auto-verify" class="cta-button primary">📝 一键创建飞书文档</a>
+            <a href="https://shurenai-backend.onrender.com/api/feishu/verify" class="cta-button">开发者测试</a>
+            <a href="https://shurenai-backend.onrender.com/api/feishu/auto-verify" class="cta-button primary">📝 一键创建飞书文档</a>
         </div>
         
         <div class="share-section">
             <h3>📤 分享给朋友</h3>
             <p>复制以下链接分享给朋友，他们点击后可以直接在自己的飞书账户中创建测试文档：</p>
             <div class="share-url">
-                https://shurenai.xyz/.netlify/functions/feishu-auto-verify
+                https://shurenai-backend.onrender.com/api/feishu/auto-verify
             </div>
             <button onclick="copyToClipboard()" class="cta-button" style="background: rgba(255, 255, 255, 0.2);">
                 📋 复制链接
@@ -170,7 +170,7 @@
     
     <script>
         function copyToClipboard() {
-            const url = 'https://shurenai.xyz/.netlify/functions/feishu-auto-verify';
+            const url = 'https://shurenai-backend.onrender.com/api/feishu/auto-verify';
             navigator.clipboard.writeText(url).then(function() {
                 alert('链接已复制到剪贴板！');
             }, function(err) {
