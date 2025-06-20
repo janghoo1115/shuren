@@ -18,15 +18,28 @@ const crypto = new WeChatCrypto(
   WECHAT_CONFIG.corpId
 );
 
+// 存储最近的回调请求（用于调试）
+let recentCallbacks = [];
+
 // 微信回调处理
 router.all('/callback', async (req, res) => {
   try {
-    console.log('收到微信回调请求:', {
+    const callbackInfo = {
+      timestamp: new Date().toISOString(),
       method: req.method,
       query: req.query,
       headers: req.headers,
-      body: req.body
-    });
+      body: req.body,
+      ip: req.ip || req.connection.remoteAddress
+    };
+    
+    // 保存最近10个回调请求
+    recentCallbacks.unshift(callbackInfo);
+    if (recentCallbacks.length > 10) {
+      recentCallbacks = recentCallbacks.slice(0, 10);
+    }
+    
+    console.log('收到微信回调请求:', callbackInfo);
 
     const { msg_signature, timestamp, nonce, echostr } = req.query;
 
@@ -402,10 +415,12 @@ router.post('/test-auto-reply', async (req, res) => {
 // 调试接口：查看最近的回调日志
 router.get('/debug/recent-callbacks', (req, res) => {
   res.json({
-    message: '请查看服务器日志或使用Render Dashboard查看实时日志',
+    recent_callbacks: recentCallbacks,
+    callback_count: recentCallbacks.length,
     callback_url: 'https://backend.shurenai.xyz/api/wechat/callback',
     status: '服务正常运行',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    message: recentCallbacks.length > 0 ? '有回调记录' : '暂无回调记录，请检查企微配置'
   });
 });
 
