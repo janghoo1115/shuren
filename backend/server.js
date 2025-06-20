@@ -19,6 +19,9 @@ app.use(cors({
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+
+// 为企微回调专门配置XML解析
+app.use('/api/wechat/callback', bodyParser.text({ type: 'text/xml' }));
 app.use(bodyParser.raw({ type: 'text/xml' }));
 
 // 导入路由
