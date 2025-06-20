@@ -179,7 +179,7 @@ async function sendAutoReply(fromUser) {
       agentid: WECHAT_CONFIG.agentId,
       msgtype: 'text',
       text: {
-        content: '知道了，我现在去处理'
+        content: '好的收到'
       }
     };
 
