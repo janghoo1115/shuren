@@ -822,4 +822,571 @@ router.get('/kf/account/list', async (req, res) => {
   }
 });
 
+// 发送客服消息（根据官方文档支持多种消息类型）
+router.post('/kf/send-message', async (req, res) => {
+  try {
+    const { touser, open_kfid, msgtype, content, ...otherData } = req.body;
+    
+    if (!touser || !open_kfid || !msgtype) {
+      return res.status(400).json({ 
+        error: '参数不完整',
+        required: 'touser, open_kfid, msgtype'
+      });
+    }
+
+    // 获取客服access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    // 构建消息体
+    let messageBody = {
+      touser: touser,
+      open_kfid: open_kfid,
+      msgtype: msgtype
+    };
+
+    // 根据消息类型构建不同的消息内容
+    switch (msgtype) {
+      case 'text':
+        if (!content) {
+          return res.status(400).json({ error: '文本消息需要content参数' });
+        }
+        messageBody.text = { content: content };
+        break;
+        
+      case 'image':
+        if (!otherData.media_id) {
+          return res.status(400).json({ error: '图片消息需要media_id参数' });
+        }
+        messageBody.image = { media_id: otherData.media_id };
+        break;
+        
+      case 'voice':
+        if (!otherData.media_id) {
+          return res.status(400).json({ error: '语音消息需要media_id参数' });
+        }
+        messageBody.voice = { media_id: otherData.media_id };
+        break;
+        
+      case 'video':
+        if (!otherData.media_id) {
+          return res.status(400).json({ error: '视频消息需要media_id参数' });
+        }
+        messageBody.video = { media_id: otherData.media_id };
+        break;
+        
+      case 'file':
+        if (!otherData.media_id) {
+          return res.status(400).json({ error: '文件消息需要media_id参数' });
+        }
+        messageBody.file = { media_id: otherData.media_id };
+        break;
+        
+      case 'link':
+        if (!otherData.title || !otherData.url || !otherData.thumb_media_id) {
+          return res.status(400).json({ error: '链接消息需要title, url, thumb_media_id参数' });
+        }
+        messageBody.link = {
+          title: otherData.title,
+          desc: otherData.desc || '',
+          url: otherData.url,
+          thumb_media_id: otherData.thumb_media_id
+        };
+        break;
+        
+      case 'miniprogram':
+        if (!otherData.appid || !otherData.thumb_media_id || !otherData.pagepath) {
+          return res.status(400).json({ error: '小程序消息需要appid, thumb_media_id, pagepath参数' });
+        }
+        messageBody.miniprogram = {
+          appid: otherData.appid,
+          title: otherData.title || '',
+          thumb_media_id: otherData.thumb_media_id,
+          pagepath: otherData.pagepath
+        };
+        break;
+        
+      case 'location':
+        if (otherData.latitude === undefined || otherData.longitude === undefined) {
+          return res.status(400).json({ error: '地理位置消息需要latitude, longitude参数' });
+        }
+        messageBody.location = {
+          name: otherData.name || '',
+          address: otherData.address || '',
+          latitude: otherData.latitude,
+          longitude: otherData.longitude
+        };
+        break;
+        
+      case 'msgmenu':
+        if (!otherData.list || !Array.isArray(otherData.list)) {
+          return res.status(400).json({ error: '菜单消息需要list参数（数组）' });
+        }
+        messageBody.msgmenu = {
+          head_content: otherData.head_content || '',
+          list: otherData.list,
+          tail_content: otherData.tail_content || ''
+        };
+        break;
+        
+      case 'ca_link':
+        if (!otherData.link_url) {
+          return res.status(400).json({ error: '获客链接消息需要link_url参数' });
+        }
+        messageBody.ca_link = {
+          link_url: otherData.link_url
+        };
+        break;
+        
+      default:
+        return res.status(400).json({ 
+          error: '不支持的消息类型', 
+          supported: ['text', 'image', 'voice', 'video', 'file', 'link', 'miniprogram', 'location', 'msgmenu', 'ca_link']
+        });
+    }
+
+    // 如果指定了msgid，添加到消息体中
+    if (otherData.msgid) {
+      messageBody.msgid = otherData.msgid;
+    }
+
+    // 发送消息
+    const sendResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(messageBody)
+    });
+
+    const sendData = await sendResponse.json();
+    
+    if (sendData.errcode === 0) {
+      res.json({
+        success: true,
+        message: '客服消息发送成功',
+        msgid: sendData.msgid,
+        details: sendData
+      });
+    } else {
+      res.status(400).json({ 
+        error: '客服消息发送失败', 
+        details: sendData 
+      });
+    }
+
+  } catch (error) {
+    console.error('发送客服消息失败:', error);
+    res.status(500).json({ error: '发送客服消息失败', message: error.message });
+  }
+});
+
+// 获取会话状态
+router.post('/kf/service-state/get', async (req, res) => {
+  try {
+    const { open_kfid, external_userid } = req.body;
+    
+    if (!open_kfid || !external_userid) {
+      return res.status(400).json({ 
+        error: '参数不完整',
+        required: 'open_kfid, external_userid'
+      });
+    }
+
+    // 获取客服access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    // 获取会话状态
+    const stateRequest = {
+      open_kfid: open_kfid,
+      external_userid: external_userid
+    };
+
+    const stateResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/service_state/get?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(stateRequest)
+    });
+
+    const stateData = await stateResponse.json();
+    
+    if (stateData.errcode === 0) {
+      // 状态说明映射
+      const stateMap = {
+        0: '未处理',
+        1: '由智能助手接待',
+        2: '待接入池排队中',
+        3: '由人工接待',
+        4: '已结束/未开始'
+      };
+
+      res.json({
+        success: true,
+        service_state: stateData.service_state,
+        service_state_desc: stateMap[stateData.service_state] || '未知状态',
+        servicer_userid: stateData.servicer_userid || null,
+        details: stateData
+      });
+    } else {
+      res.status(400).json({ 
+        error: '获取会话状态失败', 
+        details: stateData 
+      });
+    }
+
+  } catch (error) {
+    console.error('获取会话状态失败:', error);
+    res.status(500).json({ error: '获取会话状态失败', message: error.message });
+  }
+});
+
+// 变更会话状态
+router.post('/kf/service-state/trans', async (req, res) => {
+  try {
+    const { open_kfid, external_userid, service_state, servicer_userid } = req.body;
+    
+    if (!open_kfid || !external_userid || service_state === undefined) {
+      return res.status(400).json({ 
+        error: '参数不完整',
+        required: 'open_kfid, external_userid, service_state'
+      });
+    }
+
+    // 验证service_state有效性
+    if (![0, 1, 2, 3, 4].includes(service_state)) {
+      return res.status(400).json({ 
+        error: '无效的service_state值',
+        valid_values: [0, 1, 2, 3, 4],
+        descriptions: {
+          0: '未处理',
+          1: '由智能助手接待',
+          2: '待接入池排队中',
+          3: '由人工接待',
+          4: '已结束/未开始'
+        }
+      });
+    }
+
+    // 如果变更为人工接待状态，必须提供servicer_userid
+    if (service_state === 3 && !servicer_userid) {
+      return res.status(400).json({ 
+        error: '变更为人工接待状态时，必须提供servicer_userid'
+      });
+    }
+
+    // 获取客服access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    // 变更会话状态
+    const transRequest = {
+      open_kfid: open_kfid,
+      external_userid: external_userid,
+      service_state: service_state
+    };
+
+    // 如果提供了servicer_userid，添加到请求中
+    if (servicer_userid) {
+      transRequest.servicer_userid = servicer_userid;
+    }
+
+    const transResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/service_state/trans?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(transRequest)
+    });
+
+    const transData = await transResponse.json();
+    
+    if (transData.errcode === 0) {
+      const stateMap = {
+        0: '未处理',
+        1: '由智能助手接待',
+        2: '待接入池排队中',
+        3: '由人工接待',
+        4: '已结束/未开始'
+      };
+
+      res.json({
+        success: true,
+        message: `会话状态已变更为: ${stateMap[service_state]}`,
+        service_state: service_state,
+        msg_code: transData.msg_code || null,
+        details: transData
+      });
+    } else {
+      res.status(400).json({ 
+        error: '变更会话状态失败', 
+        details: transData 
+      });
+    }
+
+  } catch (error) {
+    console.error('变更会话状态失败:', error);
+    res.status(500).json({ error: '变更会话状态失败', message: error.message });
+  }
+});
+
+// 客服功能测试页面
+router.get('/kf/test', (req, res) => {
+  const html = `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业微信客服功能测试</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #1976d2; text-align: center; margin-bottom: 30px; }
+        .section { margin-bottom: 30px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px; }
+        .section h3 { color: #333; margin-top: 0; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        input, textarea, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { background: #1976d2; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
+        button:hover { background: #1565c0; }
+        .result { margin-top: 15px; padding: 10px; border-radius: 4px; background: #f8f9fa; border-left: 4px solid #28a745; }
+        .error { border-left-color: #dc3545; background: #f8d7da; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 企业微信客服功能测试</h1>
+        
+        <!-- 获取客服账号列表 -->
+        <div class="section">
+            <h3>📋 1. 获取客服账号列表</h3>
+            <button onclick="getKfAccounts()">获取客服账号列表</button>
+            <div id="accounts-result"></div>
+        </div>
+        
+        <!-- 发送客服消息 -->
+        <div class="section">
+            <h3>💬 2. 发送客服消息</h3>
+            <div class="form-group">
+                <label>微信用户ID (external_userid):</label>
+                <input type="text" id="touser" placeholder="用户的external_userid">
+            </div>
+            <div class="form-group">
+                <label>客服账号ID (open_kfid):</label>
+                <input type="text" id="open-kfid" placeholder="客服账号的open_kfid">
+            </div>
+            <div class="form-group">
+                <label>消息类型:</label>
+                <select id="msgtype" onchange="toggleMessageFields()">
+                    <option value="text">文本消息</option>
+                    <option value="image">图片消息</option>
+                    <option value="link">图文链接</option>
+                    <option value="location">地理位置</option>
+                </select>
+            </div>
+            <div class="form-group" id="content-group">
+                <label>消息内容:</label>
+                <textarea id="content" rows="3" placeholder="输入消息内容"></textarea>
+            </div>
+            <div id="extra-fields"></div>
+            <button onclick="sendKfMessage()">发送消息</button>
+            <div id="send-result"></div>
+        </div>
+        
+        <!-- 获取会话状态 -->
+        <div class="section">
+            <h3>📊 3. 获取会话状态</h3>
+            <div class="form-group">
+                <label>微信用户ID (external_userid):</label>
+                <input type="text" id="state-userid" placeholder="用户的external_userid">
+            </div>
+            <div class="form-group">
+                <label>客服账号ID (open_kfid):</label>
+                <input type="text" id="state-kfid" placeholder="客服账号的open_kfid">
+            </div>
+            <button onclick="getServiceState()">获取会话状态</button>
+            <div id="state-result"></div>
+        </div>
+        
+        <!-- 变更会话状态 -->
+        <div class="section">
+            <h3>🔄 4. 变更会话状态</h3>
+            <div class="form-group">
+                <label>微信用户ID (external_userid):</label>
+                <input type="text" id="trans-userid" placeholder="用户的external_userid">
+            </div>
+            <div class="form-group">
+                <label>客服账号ID (open_kfid):</label>
+                <input type="text" id="trans-kfid" placeholder="客服账号的open_kfid">
+            </div>
+            <div class="form-group">
+                <label>目标状态:</label>
+                <select id="service-state">
+                    <option value="0">0 - 未处理</option>
+                    <option value="1">1 - 由智能助手接待</option>
+                    <option value="2">2 - 待接入池排队中</option>
+                    <option value="3">3 - 由人工接待</option>
+                    <option value="4">4 - 已结束/未开始</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>接待人员ID (状态为3时必填):</label>
+                <input type="text" id="servicer-userid" placeholder="接待人员的userid">
+            </div>
+            <button onclick="transServiceState()">变更会话状态</button>
+            <div id="trans-result"></div>
+        </div>
+    </div>
+
+    <script>
+        function toggleMessageFields() {
+            const msgtype = document.getElementById('msgtype').value;
+            const extraFields = document.getElementById('extra-fields');
+            const contentGroup = document.getElementById('content-group');
+            
+            contentGroup.style.display = msgtype === 'text' ? 'block' : 'none';
+            
+            let extraHtml = '';
+            if (msgtype === 'image') {
+                extraHtml = '<div class="form-group"><label>媒体ID:</label><input type="text" id="media-id" placeholder="图片文件的media_id"></div>';
+            } else if (msgtype === 'link') {
+                extraHtml = \`
+                    <div class="form-group"><label>标题:</label><input type="text" id="link-title" placeholder="链接标题"></div>
+                    <div class="form-group"><label>描述:</label><input type="text" id="link-desc" placeholder="链接描述"></div>
+                    <div class="form-group"><label>链接URL:</label><input type="text" id="link-url" placeholder="http://example.com"></div>
+                    <div class="form-group"><label>缩略图媒体ID:</label><input type="text" id="thumb-media-id" placeholder="缩略图的media_id"></div>
+                \`;
+            } else if (msgtype === 'location') {
+                extraHtml = \`
+                    <div class="form-group"><label>位置名称:</label><input type="text" id="location-name" placeholder="位置名称"></div>
+                    <div class="form-group"><label>详细地址:</label><input type="text" id="location-address" placeholder="详细地址"></div>
+                    <div class="form-group"><label>纬度:</label><input type="number" id="latitude" step="any" placeholder="纬度 (-90 to 90)"></div>
+                    <div class="form-group"><label>经度:</label><input type="number" id="longitude" step="any" placeholder="经度 (-180 to 180)"></div>
+                \`;
+            }
+            extraFields.innerHTML = extraHtml;
+        }
+
+        async function getKfAccounts() {
+            try {
+                const response = await fetch('/api/wechat/kf/account/list');
+                const data = await response.json();
+                document.getElementById('accounts-result').innerHTML = 
+                    \`<div class="result"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('accounts-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+
+        async function sendKfMessage() {
+            const msgtype = document.getElementById('msgtype').value;
+            const messageData = {
+                touser: document.getElementById('touser').value,
+                open_kfid: document.getElementById('open-kfid').value,
+                msgtype: msgtype
+            };
+
+            if (msgtype === 'text') {
+                messageData.content = document.getElementById('content').value;
+            } else if (msgtype === 'image') {
+                messageData.media_id = document.getElementById('media-id').value;
+            } else if (msgtype === 'link') {
+                messageData.title = document.getElementById('link-title').value;
+                messageData.desc = document.getElementById('link-desc').value;
+                messageData.url = document.getElementById('link-url').value;
+                messageData.thumb_media_id = document.getElementById('thumb-media-id').value;
+            } else if (msgtype === 'location') {
+                messageData.name = document.getElementById('location-name').value;
+                messageData.address = document.getElementById('location-address').value;
+                messageData.latitude = parseFloat(document.getElementById('latitude').value);
+                messageData.longitude = parseFloat(document.getElementById('longitude').value);
+            }
+
+            try {
+                const response = await fetch('/api/wechat/kf/send-message', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(messageData)
+                });
+                const data = await response.json();
+                document.getElementById('send-result').innerHTML = 
+                    \`<div class="result \${data.success ? '' : 'error'}"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('send-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+
+        async function getServiceState() {
+            const requestData = {
+                external_userid: document.getElementById('state-userid').value,
+                open_kfid: document.getElementById('state-kfid').value
+            };
+
+            try {
+                const response = await fetch('/api/wechat/kf/service-state/get', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestData)
+                });
+                const data = await response.json();
+                document.getElementById('state-result').innerHTML = 
+                    \`<div class="result \${data.success ? '' : 'error'}"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('state-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+
+        async function transServiceState() {
+            const requestData = {
+                external_userid: document.getElementById('trans-userid').value,
+                open_kfid: document.getElementById('trans-kfid').value,
+                service_state: parseInt(document.getElementById('service-state').value)
+            };
+
+            const servicerUserid = document.getElementById('servicer-userid').value;
+            if (servicerUserid) {
+                requestData.servicer_userid = servicerUserid;
+            }
+
+            try {
+                const response = await fetch('/api/wechat/kf/service-state/trans', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestData)
+                });
+                const data = await response.json();
+                document.getElementById('trans-result').innerHTML = 
+                    \`<div class="result \${data.success ? '' : 'error'}"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('trans-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+    </script>
+</body>
+</html>
+  `;
+  
+  res.send(html);
+});
+
 module.exports = router; 
