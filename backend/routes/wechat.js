@@ -626,32 +626,78 @@ function parseKfMessage(xmlString) {
   }
 }
 
-// 发送客服自动回复
+// 发送客服自动回复（使用现有应用接口）
 async function sendKfAutoReply(fromUser, openKfId) {
   try {
     console.log('准备发送客服自动回复给微信用户:', fromUser);
     
-    // 获取客服access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
-    const tokenData = await tokenResponse.json();
+    // 先尝试客服接口，失败则使用应用接口
+    let tokenData;
     
-    if (tokenData.errcode !== 0) {
-      console.error('获取客服access_token失败:', tokenData);
+    // 尝试获取客服access_token
+    try {
+      const kfTokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
+      const kfTokenData = await kfTokenResponse.json();
+      
+      if (kfTokenData.errcode === 0) {
+        tokenData = kfTokenData;
+        console.log('使用客服接口发送回复');
+        
+        // 构建客服回复消息
+        const replyMessage = {
+          touser: fromUser,
+          open_kfid: openKfId,
+          msgtype: 'text',
+          text: {
+            content: '好的收到，我们的客服会尽快为您处理'
+          }
+        };
+
+        // 发送客服回复消息
+        const sendResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${tokenData.access_token}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(replyMessage)
+        });
+
+        const sendData = await sendResponse.json();
+        
+        if (sendData.errcode === 0) {
+          console.log('客服自动回复发送成功:', sendData);
+          return;
+        } else {
+          console.error('客服自动回复发送失败，尝试应用接口:', sendData);
+        }
+      }
+    } catch (kfError) {
+      console.log('客服接口不可用，使用应用接口:', kfError.message);
+    }
+    
+    // fallback到应用接口
+    const appTokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
+    const appTokenData = await appTokenResponse.json();
+    
+    if (appTokenData.errcode !== 0) {
+      console.error('获取应用access_token失败:', appTokenData);
       return;
     }
 
-    // 构建客服回复消息
+    console.log('使用应用接口发送回复给用户:', fromUser);
+
+    // 构建应用回复消息
     const replyMessage = {
       touser: fromUser,
-      open_kfid: openKfId,
+      agentid: WECHAT_CONFIG.agentId,
       msgtype: 'text',
       text: {
         content: '好的收到，我们的客服会尽快为您处理'
       }
     };
 
-    // 发送客服回复消息
-    const sendResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${tokenData.access_token}`, {
+    // 发送应用回复消息
+    const sendResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${appTokenData.access_token}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -662,13 +708,13 @@ async function sendKfAutoReply(fromUser, openKfId) {
     const sendData = await sendResponse.json();
     
     if (sendData.errcode === 0) {
-      console.log('客服自动回复发送成功:', sendData);
+      console.log('应用自动回复发送成功:', sendData);
     } else {
-      console.error('客服自动回复发送失败:', sendData);
+      console.error('应用自动回复发送失败:', sendData);
     }
 
   } catch (error) {
-    console.error('发送客服自动回复失败:', error);
+    console.error('发送自动回复失败:', error);
   }
 }
 
