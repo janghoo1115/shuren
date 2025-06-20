@@ -5,7 +5,7 @@ const router = express.Router();
 const FEISHU_CONFIG = {
   appId: process.env.FEISHU_APP_ID,
   appSecret: process.env.FEISHU_APP_SECRET,
-  redirectUri: process.env.FEISHU_REDIRECT_URI || 'https://shurenai-backend.onrender.com/api/feishu/callback'
+  redirectUri: process.env.FEISHU_REDIRECT_URI || 'https://backend.shurenai.xyz/api/feishu/callback'
 };
 
 // 飞书OAuth验证页面
@@ -76,6 +76,10 @@ router.get('/verify', (req, res) => {
         <div class="container">
             <h1 class="title">数刃AI</h1>
             <p class="subtitle">授权飞书访问权限，自动为您创建文档</p>
+            <div style="margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; font-size: 14px; color: #666;">
+                <p>🔒 安全提示：此服务将跳转到飞书官方授权页面</p>
+                <p>📱 如遇微信安全提示，请选择"继续访问"</p>
+            </div>
             <a href="${authUrl}" class="auth-btn">授权飞书账户</a>
         </div>
     </body>
