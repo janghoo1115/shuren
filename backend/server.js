@@ -22,6 +22,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 // 为企微回调专门配置XML解析
 app.use('/api/wechat/callback', bodyParser.text({ type: 'text/xml' }));
+app.use('/api/wechat/kf/callback', bodyParser.text({ type: 'text/xml' }));
 app.use(bodyParser.raw({ type: 'text/xml' }));
 
 // 导入路由
@@ -41,6 +42,24 @@ app.use('/api/user', userRoutes);
 // 健康检查
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// IP检查
+app.get('/ip', async (req, res) => {
+  try {
+    const response = await fetch('https://httpbin.org/ip');
+    const data = await response.json();
+    res.json({ 
+      server_ip: data.origin,
+      timestamp: new Date().toISOString(),
+      message: '这是Render服务器的出站IP'
+    });
+  } catch (error) {
+    res.json({ 
+      error: '无法获取IP',
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // 根路径
