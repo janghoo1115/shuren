@@ -496,10 +496,10 @@ router.get('/kf/access-token', async (req, res) => {
   }
 });
 
-// 客服消息回调处理
+// 客服事件回调处理（根据官方文档正确实现）
 router.all('/kf/callback', async (req, res) => {
   try {
-    console.log('收到客服回调请求:', {
+    console.log('收到客服事件回调:', {
       method: req.method,
       query: req.query,
       body: req.body
@@ -531,7 +531,7 @@ router.all('/kf/callback', async (req, res) => {
       }
     }
 
-    // POST请求：处理客服消息
+    // POST请求：处理客服事件
     if (req.method === 'POST') {
       if (!msg_signature || !timestamp || !nonce) {
         return res.status(400).send('参数不完整');
@@ -547,7 +547,7 @@ router.all('/kf/callback', async (req, res) => {
         bodyStr = JSON.stringify(req.body);
       }
 
-      console.log('客服消息原始内容:', bodyStr);
+      console.log('客服事件原始内容:', bodyStr);
 
       // 提取加密消息
       const xmlMatch = bodyStr.match(/<Encrypt><!\[CDATA\[(.*?)\]\]><\/Encrypt>/);
@@ -563,17 +563,17 @@ router.all('/kf/callback', async (req, res) => {
         return res.status(403).send('签名验证失败');
       }
 
-      // 解密消息
+      // 解密事件
       try {
         const decryptedMsg = crypto.decrypt(encryptedMsg);
-        console.log('客服解密后的消息:', decryptedMsg);
+        console.log('客服解密后的事件:', decryptedMsg);
 
-        // 处理客服消息
-        await handleKfMessage(decryptedMsg);
+        // 处理客服事件（kf_msg_or_event）
+        await handleKfEvent(decryptedMsg);
 
         return res.send('success');
       } catch (decryptError) {
-        console.error('客服解密消息失败:', decryptError);
+        console.error('客服解密事件失败:', decryptError);
         return res.status(500).send('解密失败');
       }
     }
@@ -585,35 +585,37 @@ router.all('/kf/callback', async (req, res) => {
   }
 });
 
-// 处理客服消息
-async function handleKfMessage(message) {
+// 处理客服事件（根据官方文档）
+async function handleKfEvent(eventData) {
   try {
-    console.log('处理客服消息:', message);
+    console.log('处理客服事件:', eventData);
     
-    // 解析XML消息
-    const messageData = parseKfMessage(message);
-    console.log('解析后的客服消息数据:', messageData);
+    // 解析XML事件
+    const event = parseKfEvent(eventData);
+    console.log('解析后的客服事件数据:', event);
     
-    // 如果是来自微信用户的文本消息，自动回复
-    if (messageData && messageData.MsgType === 'text' && messageData.FromUserName) {
-      await sendKfAutoReply(messageData.FromUserName, messageData.OpenKfId);
+    // 如果是kf_msg_or_event事件，说明有新消息
+    if (event && event.Event === 'kf_msg_or_event') {
+      console.log('检测到新消息事件，开始拉取消息...');
+      
+      // 使用token主动拉取消息
+      await pullAndProcessMessages(event.Token, event.OpenKfId);
     }
     
   } catch (error) {
-    console.error('处理客服消息失败:', error);
+    console.error('处理客服事件失败:', error);
   }
 }
 
-// 解析客服XML消息
-function parseKfMessage(xmlString) {
+// 解析客服XML事件
+function parseKfEvent(xmlString) {
   try {
     const patterns = {
       ToUserName: /<ToUserName><!\[CDATA\[(.*?)\]\]><\/ToUserName>/,
-      FromUserName: /<FromUserName><!\[CDATA\[(.*?)\]\]><\/FromUserName>/,
       CreateTime: /<CreateTime>(.*?)<\/CreateTime>/,
       MsgType: /<MsgType><!\[CDATA\[(.*?)\]\]><\/MsgType>/,
-      Content: /<Content><!\[CDATA\[(.*?)\]\]><\/Content>/,
-      MsgId: /<MsgId>(.*?)<\/MsgId>/,
+      Event: /<Event><!\[CDATA\[(.*?)\]\]><\/Event>/,
+      Token: /<Token><!\[CDATA\[(.*?)\]\]><\/Token>/,
       OpenKfId: /<OpenKfId><!\[CDATA\[(.*?)\]\]><\/OpenKfId>/
     };
     
@@ -627,8 +629,73 @@ function parseKfMessage(xmlString) {
     
     return Object.keys(result).length > 0 ? result : null;
   } catch (error) {
-    console.error('解析客服XML消息失败:', error);
+    console.error('解析客服XML事件失败:', error);
     return null;
+  }
+}
+
+// 拉取并处理消息（根据官方文档）
+async function pullAndProcessMessages(token, openKfId) {
+  try {
+    console.log('开始拉取消息，token:', token, 'openKfId:', openKfId);
+    
+    // 获取客服access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.errcode !== 0) {
+      console.error('获取客服access_token失败:', tokenData);
+      return;
+    }
+    
+    // 调用sync_msg接口拉取消息
+    const syncRequest = {
+      token: token,
+      limit: 100,
+      voice_format: 0,
+      open_kfid: openKfId
+    };
+    
+    const syncResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(syncRequest)
+    });
+    
+    const syncData = await syncResponse.json();
+    console.log('消息拉取结果:', syncData);
+    
+    if (syncData.errcode === 0 && syncData.msg_list) {
+      // 处理每条消息
+      for (const msg of syncData.msg_list) {
+        await processKfMessage(msg, openKfId);
+      }
+    } else {
+      console.error('拉取消息失败:', syncData);
+    }
+    
+  } catch (error) {
+    console.error('拉取消息失败:', error);
+  }
+}
+
+// 处理单条客服消息
+async function processKfMessage(msg, openKfId) {
+  try {
+    console.log('处理客服消息:', msg);
+    
+    // 只处理来自微信客户的文本消息 (origin: 3)
+    if (msg.origin === 3 && msg.msgtype === 'text') {
+      console.log('检测到微信客户文本消息，准备自动回复...');
+      
+      // 自动回复
+      await sendKfAutoReply(msg.external_userid, openKfId);
+    }
+    
+  } catch (error) {
+    console.error('处理客服消息失败:', error);
   }
 }
 
@@ -649,7 +716,7 @@ async function sendKfAutoReply(fromUser, openKfId) {
         tokenData = kfTokenData;
         console.log('使用客服接口发送回复');
         
-        // 构建客服回复消息
+        // 构建客服回复消息（根据官方API文档）
         const replyMessage = {
           touser: fromUser,
           open_kfid: openKfId,
