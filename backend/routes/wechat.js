@@ -78,19 +78,29 @@ router.all('/callback', async (req, res) => {
 
       // 获取加密的消息体
       let encryptedMsg;
+      let bodyStr = '';
+      
+      // 处理不同格式的请求体
       if (typeof req.body === 'string') {
-        // 处理XML格式
-        const xmlMatch = req.body.match(/<Encrypt><!\[CDATA\[(.*?)\]\]><\/Encrypt>/);
-        if (xmlMatch) {
-          encryptedMsg = xmlMatch[1];
-        } else {
-          console.log('未找到加密消息体');
-          return res.status(400).send('消息格式错误');
-        }
-      } else if (req.body && req.body.Encrypt) {
-        encryptedMsg = req.body.Encrypt;
+        bodyStr = req.body;
+      } else if (Buffer.isBuffer(req.body)) {
+        bodyStr = req.body.toString('utf8');
+      } else if (req.body && typeof req.body === 'object') {
+        bodyStr = JSON.stringify(req.body);
       } else {
-        console.log('无法获取加密消息体');
+        console.log('无法解析请求体格式:', typeof req.body);
+        return res.status(400).send('请求体格式错误');
+      }
+      
+      console.log('解析的XML字符串:', bodyStr.substring(0, 200) + '...');
+      
+      // 从XML中提取加密消息
+      const xmlMatch = bodyStr.match(/<Encrypt><!\[CDATA\[(.*?)\]\]><\/Encrypt>/);
+      if (xmlMatch) {
+        encryptedMsg = xmlMatch[1];
+        console.log('提取到的加密消息:', encryptedMsg.substring(0, 50) + '...');
+      } else {
+        console.log('未找到加密消息体，原始内容:', bodyStr);
         return res.status(400).send('消息格式错误');
       }
 
