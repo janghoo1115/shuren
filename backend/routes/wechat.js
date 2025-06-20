@@ -8,7 +8,7 @@ const WECHAT_CONFIG = {
   encodingAESKey: process.env.WECHAT_ENCODING_AES_KEY,
   corpId: process.env.WECHAT_CORP_ID,
   agentId: process.env.WECHAT_AGENT_ID,
-  corpSecret: process.env.WECHAT_CORP_SECRET
+  corpSecret: process.env.WECHAT_CORP_SECRET || process.env.WECHAT_SECRET
 };
 
 // 创建加密工具实例
