@@ -8,7 +8,8 @@ const WECHAT_CONFIG = {
   encodingAESKey: process.env.WECHAT_ENCODING_AES_KEY,
   corpId: process.env.WECHAT_CORP_ID,
   agentId: process.env.WECHAT_AGENT_ID,
-  corpSecret: process.env.WECHAT_CORP_SECRET || process.env.WECHAT_SECRET
+  corpSecret: process.env.WECHAT_CORP_SECRET || process.env.WECHAT_SECRET,
+  kfSecret: process.env.WECHAT_KF_SECRET || process.env.WECHAT_CORP_SECRET || process.env.WECHAT_SECRET
 };
 
 // 创建加密工具实例
@@ -472,7 +473,8 @@ router.get('/debug/test-message/:userid', async (req, res) => {
 // 获取客服接口凭证
 router.get('/kf/access-token', async (req, res) => {
   try {
-    const response = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
+    // 使用客服专用密钥
+    const response = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
     const data = await response.json();
     
     if (data.errcode === 0) {
@@ -482,7 +484,11 @@ router.get('/kf/access-token', async (req, res) => {
         message: '客服接口凭证获取成功'
       });
     } else {
-      res.status(400).json({ error: data.errmsg, errcode: data.errcode });
+      res.status(400).json({ 
+        error: data.errmsg, 
+        errcode: data.errcode,
+        hint: '请检查是否配置了正确的客服密钥(WECHAT_KF_SECRET)'
+      });
     }
   } catch (error) {
     console.error('获取客服access_token失败:', error);
@@ -634,10 +640,10 @@ async function sendKfAutoReply(fromUser, openKfId) {
     // 先尝试客服接口，失败则使用应用接口
     let tokenData;
     
-    // 尝试获取客服access_token
-    try {
-      const kfTokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
-      const kfTokenData = await kfTokenResponse.json();
+         // 尝试获取客服access_token
+     try {
+       const kfTokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+       const kfTokenData = await kfTokenResponse.json();
       
       if (kfTokenData.errcode === 0) {
         tokenData = kfTokenData;
@@ -722,7 +728,7 @@ async function sendKfAutoReply(fromUser, openKfId) {
 router.get('/kf/account/list', async (req, res) => {
   try {
     // 获取客服access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
     const tokenData = await tokenResponse.json();
     
     if (tokenData.errcode !== 0) {
