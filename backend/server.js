@@ -61,6 +61,7 @@ app.use((err, req, res, next) => {
     error: '服务器内部错误',
     message: process.env.NODE_ENV === 'development' ? err.message : '请稍后重试'
   });
+  next();
 });
 
 // 404处理
