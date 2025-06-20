@@ -231,70 +231,12 @@ router.get('/callback', async (req, res) => {
 // 自动验证（一键授权）
 router.get('/auto-verify', (req, res) => {
   const state = Math.random().toString(36).substring(7);
-  const authUrl = `https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=${FEISHU_CONFIG.appId}&redirect_uri=${encodeURIComponent(FEISHU_CONFIG.redirectUri.replace('/callback', '/auto-create'))}&scope=drive:drive&state=${state}`;
+  const authUrl = `https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=${FEISHU_CONFIG.appId}&redirect_uri=${encodeURIComponent(FEISHU_CONFIG.redirectUri)}&scope=drive:drive&state=${state}`;
   
   res.redirect(authUrl);
 });
 
-// 自动创建文档
-router.get('/auto-create', async (req, res) => {
-  try {
-    const { code } = req.query;
-    
-    if (!code) {
-      return res.status(400).send('授权失败：缺少授权码');
-    }
-
-    // 获取用户访问令牌
-    const tokenResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/access_token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await getAppToken()}`
-      },
-      body: JSON.stringify({
-        grant_type: 'authorization_code',
-        code: code
-      })
-    });
-
-    const tokenData = await tokenResponse.json();
-
-    if (tokenData.code !== 0) {
-      return res.status(400).json({ error: '获取访问令牌失败', details: tokenData });
-    }
-
-    const accessToken = tokenData.data.access_token;
-
-    // 创建文档
-    const docResponse = await fetch('https://open.feishu.cn/open-apis/docx/v1/documents', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`
-      },
-      body: JSON.stringify({
-        title: "微信随心记"
-      })
-    });
-
-    const docData = await docResponse.json();
-
-    if (docData.code !== 0) {
-      return res.status(400).json({ error: '创建文档失败', details: docData });
-    }
-
-    const docId = docData.data.document.document_id;
-
-    // 不添加任何内容，保持文档为空
-
-    res.redirect(`https://shurenai.xyz?doc_id=${docId}&success=true`);
-
-  } catch (error) {
-    console.error('自动创建文档失败:', error);
-    res.status(500).send(`创建文档失败: ${error.message}`);
-  }
-});
+// auto-create路由已删除，统一使用callback处理
 
 // 获取应用访问令牌
 async function getAppToken() {
