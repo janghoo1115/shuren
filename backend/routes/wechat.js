@@ -2474,4 +2474,31 @@ router.get('/kf/test-complete', (req, res) => {
   res.send(html);
 });
 
+// 调试客服接口
+router.get('/kf/debug-raw', async (req, res) => {
+  try {
+    const testUrl = `https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`;
+    console.log('调试URL:', testUrl);
+    
+    const response = await fetch(testUrl);
+    const responseText = await response.text();
+    
+    console.log('企业微信返回状态:', response.status);
+    console.log('企业微信返回内容:', responseText);
+    
+    res.json({
+      status: response.status,
+      raw_content: responseText,
+      content_length: responseText.length,
+      url: testUrl
+    });
+  } catch (error) {
+    console.error('调试失败:', error);
+    res.status(500).json({ 
+      error: '调试失败',
+      details: error.message
+    });
+  }
+});
+
 module.exports = router; 
