@@ -209,8 +209,8 @@ async function handleWeChatMessage(message, timestamp, nonce) {
           fromUser: messageData.FromUserName
         });
         
-        console.log('这是一个客服系统事件，可能需要通过客服API获取具体消息内容');
-        // 对于客服事件，我们记录下来但需要通过其他API获取具体消息
+        console.log('这是一个客服系统事件，准备发送自动回复');
+        // 对于客服事件，我们记录下来并发送自动回复
         const eventRecord = {
           timestamp: new Date().toISOString(),
           fromUser: messageData.FromUserName || 'unknown',
@@ -232,6 +232,21 @@ async function handleWeChatMessage(message, timestamp, nonce) {
         console.log('事件类型:', eventRecord.eventType);
         console.log('Token:', eventRecord.token);
         console.log('=====================');
+        
+        // 为客服事件生成自动回复
+        try {
+          const replyXml = await generatePassiveReply(
+            messageData.ToUserName,    // 企业微信
+            'wechat_user',            // 微信用户（用占位符，因为FromUserName可能为空）
+            '您好！我们已收到您的消息，客服人员会尽快为您处理，请稍候！',
+            timestamp,
+            nonce
+          );
+          console.log('客服事件自动回复生成成功');
+          return replyXml;
+        } catch (error) {
+          console.error('生成客服事件自动回复失败:', error);
+        }
       }
     } else if (messageData) {
       console.log('收到其他类型消息，类型:', messageData.MsgType);
@@ -357,6 +372,49 @@ async function notifyCustomerServiceMessage(messageData) {
 
   } catch (error) {
     console.error('通知客服消息失败:', error);
+    throw error;
+  }
+}
+
+// 生成被动回复的XML格式消息
+async function generatePassiveReply(fromUser, toUser, content, timestamp, nonce) {
+  try {
+    console.log('开始生成被动回复...');
+    console.log('From:', fromUser, 'To:', toUser, 'Content:', content);
+    
+    // 构建回复XML
+    const replyXml = `<xml>
+<ToUserName><![CDATA[${toUser}]]></ToUserName>
+<FromUserName><![CDATA[${fromUser}]]></FromUserName>
+<CreateTime>${Math.floor(Date.now() / 1000)}</CreateTime>
+<MsgType><![CDATA[text]]></MsgType>
+<Content><![CDATA[${content}]]></Content>
+</xml>`;
+    
+    console.log('生成的回复XML:', replyXml);
+    
+    // 加密回复内容
+    const encryptedReply = crypto.encrypt(replyXml);
+    console.log('加密后的回复内容:', encryptedReply.substring(0, 100) + '...');
+    
+    // 生成新的签名
+    const newTimestamp = Math.floor(Date.now() / 1000).toString();
+    const newNonce = Math.random().toString(36).substring(2, 15);
+    const signature = crypto.generateSignature(newTimestamp, newNonce, encryptedReply);
+    
+    // 构建加密后的响应XML
+    const responseXml = `<xml>
+<Encrypt><![CDATA[${encryptedReply}]]></Encrypt>
+<MsgSignature><![CDATA[${signature}]]></MsgSignature>
+<TimeStamp>${newTimestamp}</TimeStamp>
+<Nonce><![CDATA[${newNonce}]]></Nonce>
+</xml>`;
+    
+    console.log('最终响应XML:', responseXml);
+    return responseXml;
+    
+  } catch (error) {
+    console.error('生成被动回复失败:', error);
     throw error;
   }
 }
