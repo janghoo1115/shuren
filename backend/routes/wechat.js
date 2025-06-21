@@ -175,7 +175,7 @@ router.all('/callback', async (req, res) => {
         if (replyXml) {
           return res.send(replyXml);
         } else {
-          return res.send('success');
+        return res.send('success');
         }
       } catch (decryptError) {
         addProcessingLog('ERROR', '解密消息失败', {
@@ -254,7 +254,7 @@ async function handleWeChatMessage(message, timestamp, nonce) {
         setTimeout(async () => {
           try {
             await handleKfMessage(messageData.Token);
-          } catch (error) {
+  } catch (error) {
             console.error('处理客服消息失败:', error);
           }
         }, 100);
@@ -483,12 +483,27 @@ async function handleKfMessage(token) {
       });
     }
     
-    // 处理每条消息
+    // 处理每条消息（按时间排序，只处理最新的用户消息）
     if (syncResult.msg_list && syncResult.msg_list.length > 0) {
-      for (const msg of syncResult.msg_list) {
-        if (msg.origin === 3) { // 微信用户发送的消息
-          await processKfUserMessage(msg, tokenData.access_token);
-        }
+      // 筛选出用户发送的消息并按时间排序
+      const userMessages = syncResult.msg_list
+        .filter(msg => msg.origin === 3) // 微信用户发送的消息
+        .sort((a, b) => b.send_time - a.send_time); // 按发送时间倒序排列（最新的在前）
+      
+      addProcessingLog('KF', '筛选用户消息', {
+        total_messages: syncResult.msg_list.length,
+        user_messages: userMessages.length,
+        latest_message: userMessages.length > 0 ? {
+          msgid: userMessages[0].msgid,
+          send_time: userMessages[0].send_time,
+          content: userMessages[0].msgtype === 'text' ? userMessages[0].text.content : '非文本'
+        } : null
+      });
+      
+      // 只处理最新的一条用户消息
+      if (userMessages.length > 0) {
+        const latestMsg = userMessages[0];
+        await processKfUserMessage(latestMsg, tokenData.access_token);
       }
     }
     
@@ -905,7 +920,7 @@ router.get('/debug/customer-messages', (req, res) => {
 
 // 调试接口：查看处理日志
 router.get('/debug/processing-logs', (req, res) => {
-  res.json({
+    res.json({
     processing_logs: processingLogs,
     log_count: processingLogs.length,
     status: '日志记录服务正常',
@@ -931,7 +946,7 @@ router.get('/debug/clear-reply-limits', (req, res) => {
   const beforeCount = userLastReplyTime.size;
   userLastReplyTime.clear();
   
-  res.json({
+      res.json({ 
     success: true,
     message: '已清除所有用户回复时间限制',
     cleared_users: beforeCount,
@@ -1025,11 +1040,11 @@ router.get('/debug/test-message/:userid', async (req, res) => {
     // 模拟收到消息并触发自动回复
     await sendAutoReply(userid);
     
-    res.json({
-      success: true,
+      res.json({
+        success: true,
       message: `已向用户 ${userid} 发送测试回复`,
       content: '好的收到，我们的客服会尽快为您处理'
-    });
+      });
   } catch (error) {
     res.status(500).json({
       error: '测试消息发送失败',
@@ -1100,8 +1115,8 @@ router.post('/customer-service-reply', async (req, res) => {
     console.log('收到客服回复请求:', { touser, content, msgtype });
     
     // 这里可以记录到数据库或队列中，等待后续处理
-    res.json({
-      success: true,
+      res.json({
+        success: true,
       message: '客服回复已记录，但无法直接发送给微信用户',
       note: '企业微信应用无法直接回复微信用户，需要通过其他渠道或等待微信官方支持',
       touser,
@@ -1121,9 +1136,9 @@ router.get('/check-ip', async (req, res) => {
     // 通过外部服务获取服务器出站IP
     const response = await fetch('https://httpbin.org/ip');
     const data = await response.json();
-    
-    res.json({
-      success: true,
+
+      res.json({
+        success: true,
       server_ip: data.origin,
       timestamp: new Date().toISOString(),
       message: '请将此IP添加到企业微信应用的可信IP列表中'
@@ -1200,7 +1215,7 @@ router.get('/test', (req, res) => {
                     <h4>获取企业用户列表</h4>
                     <button onclick="getUsers()">获取用户列表</button>
                     <div id="users-result"></div>
-                </div>
+            </div>
                 <div class="col">
                     <h4>查看回调日志</h4>
                     <button onclick="getCallbacks()">查看最近回调</button>
@@ -1215,33 +1230,33 @@ router.get('/test', (req, res) => {
             <div class="row">
                 <div class="col">
                     <h4>发送单条消息</h4>
-                    <div class="form-group">
+            <div class="form-group">
                         <label>用户ID (userid):</label>
                         <input type="text" id="touser" placeholder="企业微信用户ID">
-                    </div>
-                    <div class="form-group">
-                        <label>消息类型:</label>
+            </div>
+            <div class="form-group">
+                <label>消息类型:</label>
                         <select id="msgtype">
-                            <option value="text">文本消息</option>
+                    <option value="text">文本消息</option>
                             <option value="markdown">Markdown消息</option>
-                        </select>
-                    </div>
+                </select>
+            </div>
                     <div class="form-group">
-                        <label>消息内容:</label>
-                        <textarea id="content" rows="3" placeholder="输入消息内容"></textarea>
-                    </div>
+                <label>消息内容:</label>
+                <textarea id="content" rows="3" placeholder="输入消息内容"></textarea>
+            </div>
                     <button onclick="sendMessage()">发送消息</button>
-                    <div id="send-result"></div>
-                </div>
+            <div id="send-result"></div>
+        </div>
                 <div class="col">
                     <h4>测试自动回复</h4>
-                    <div class="form-group">
+            <div class="form-group">
                         <label>用户ID:</label>
                         <input type="text" id="test-userid" placeholder="测试自动回复的用户ID">
-                    </div>
+            </div>
                     <button onclick="testAutoReply()">测试自动回复</button>
                     <div id="auto-reply-result"></div>
-                </div>
+            </div>
             </div>
         </div>
         
