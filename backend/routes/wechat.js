@@ -639,7 +639,7 @@ async function pullAndProcessMessages(token, openKfId) {
     console.log('开始拉取消息，token:', token, 'openKfId:', openKfId);
     
     // 获取客服access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
     
     if (tokenData.errcode !== 0) {
@@ -793,7 +793,7 @@ async function sendKfAutoReply(fromUser, openKfId) {
 // 获取客服账号列表
 router.get('/kf/account/list', async (req, res) => {
   try {
-    // 获取客服access_token
+    // 获取客服 access_token
     const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
     
@@ -833,8 +833,8 @@ router.post('/kf/send-message', async (req, res) => {
       });
     }
 
-    // 获取客服access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    // 获取客服 access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
     
     if (tokenData.errcode !== 0) {
@@ -996,8 +996,8 @@ router.post('/kf/service-state/get', async (req, res) => {
       });
     }
 
-    // 获取客服access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    // 获取客服 access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
     
     if (tokenData.errcode !== 0) {
@@ -1084,8 +1084,8 @@ router.post('/kf/service-state/trans', async (req, res) => {
       });
     }
 
-    // 获取客服access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    // 获取客服 access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
     
     if (tokenData.errcode !== 0) {
@@ -1465,7 +1465,7 @@ router.post('/kf/account/add', async (req, res) => {
     }
 
     // 获取客服 access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
 
     if (tokenData.errcode !== 0) {
@@ -1501,7 +1501,7 @@ router.post('/kf/account/update', async (req, res) => {
       return res.status(400).json({ error: '参数不完整', required: 'open_kfid, name' });
     }
 
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
 
     if (tokenData.errcode !== 0) {
@@ -1536,7 +1536,7 @@ router.post('/kf/account/del', async (req, res) => {
       return res.status(400).json({ error: '参数不完整', required: 'open_kfid' });
     }
 
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
 
     if (tokenData.errcode !== 0) {
@@ -1571,7 +1571,7 @@ router.post('/kf/account/invite', async (req, res) => {
       return res.status(400).json({ error: '参数不完整', required: 'open_kfid, wxid' });
     }
 
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
 
     if (tokenData.errcode !== 0) {
@@ -1607,7 +1607,7 @@ router.post('/kf/account/upload-avatar', async (req, res) => {
     }
 
     // 获取客服 access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
 
     if (tokenData.errcode !== 0) {
@@ -1649,7 +1649,7 @@ router.post('/kf/servicer/add', async (req, res) => {
     }
 
     // 获取客服 access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
 
     if (tokenData.errcode !== 0) {
@@ -1703,7 +1703,7 @@ router.post('/kf/servicer/del', async (req, res) => {
     }
 
     // 获取客服 access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
 
     if (tokenData.errcode !== 0) {
@@ -1754,7 +1754,7 @@ router.get('/kf/servicer/list', async (req, res) => {
     }
 
     // 获取客服 access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
 
     if (tokenData.errcode !== 0) {
@@ -1789,7 +1789,7 @@ router.post('/kf/sync-msg', async (req, res) => {
     const { cursor, token, limit = 1000, voice_format = 0, open_kfid } = req.body;
 
     // 获取客服 access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
 
     if (tokenData.errcode !== 0) {
@@ -1847,7 +1847,7 @@ router.post('/kf/send-event-msg', async (req, res) => {
     }
 
     // 获取客服 access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
 
     if (tokenData.errcode !== 0) {
@@ -1953,7 +1953,7 @@ router.get('/kf/customer/info', async (req, res) => {
     }
 
     // 获取客服 access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
 
     if (tokenData.errcode !== 0) {
@@ -2001,7 +2001,7 @@ router.get('/kf/account/link', async (req, res) => {
     }
 
     // 获取客服 access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
 
     if (tokenData.errcode !== 0) {
