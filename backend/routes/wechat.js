@@ -469,6 +469,20 @@ async function handleKfMessage(token) {
     console.log(JSON.stringify(syncResult, null, 2));
     console.log('=====================');
     
+    // 记录同步到的消息详情到日志
+    if (syncResult.msg_list && syncResult.msg_list.length > 0) {
+      addProcessingLog('KF', '同步到的消息列表', {
+        msg_count: syncResult.msg_list.length,
+        messages: syncResult.msg_list.map(msg => ({
+          msgid: msg.msgid,
+          msgtype: msg.msgtype,
+          origin: msg.origin,
+          send_time: msg.send_time,
+          content: msg.msgtype === 'text' ? msg.text.content : '非文本消息'
+        }))
+      });
+    }
+    
     // 处理每条消息
     if (syncResult.msg_list && syncResult.msg_list.length > 0) {
       for (const msg of syncResult.msg_list) {
