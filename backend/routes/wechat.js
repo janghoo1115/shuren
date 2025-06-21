@@ -24,6 +24,9 @@ let recentCallbacks = [];
 // 存储接收到的客服消息
 let customerMessages = [];
 
+// 存储处理日志
+let processingLogs = [];
+
 // 微信回调处理
 router.all('/callback', async (req, res) => {
   try {
@@ -117,11 +120,19 @@ router.all('/callback', async (req, res) => {
 
       // 解密消息
       try {
+        console.log('开始解密消息...');
+        console.log('加密消息长度:', encryptedMsg.length);
+        console.log('时间戳:', timestamp);
+        console.log('随机数:', nonce);
+        
         const decryptedMsg = crypto.decrypt(encryptedMsg);
-        console.log('解密后的消息:', decryptedMsg);
+        console.log('解密成功！消息长度:', decryptedMsg.length);
+        console.log('解密后的消息内容:', decryptedMsg);
 
         // 处理消息并获取回复内容
+        console.log('开始处理解密后的消息...');
         const replyXml = await handleWeChatMessage(decryptedMsg, timestamp, nonce);
+        console.log('消息处理完成，返回结果:', replyXml ? '有回复' : '无回复');
         
         // 如果有回复内容，返回加密的回复；否则返回success
         if (replyXml) {
@@ -130,7 +141,10 @@ router.all('/callback', async (req, res) => {
           return res.send('success');
         }
       } catch (decryptError) {
-        console.error('解密消息失败:', decryptError);
+        console.error('解密消息失败 - 错误类型:', decryptError.constructor.name);
+        console.error('解密消息失败 - 错误信息:', decryptError.message);
+        console.error('解密消息失败 - 完整错误:', decryptError);
+        console.error('加密消息内容:', encryptedMsg.substring(0, 100) + '...');
         return res.status(500).send('解密失败');
       }
     }
@@ -206,7 +220,10 @@ async function handleWeChatMessage(message, timestamp, nonce) {
     return null; // 不回复
     
   } catch (error) {
-    console.error('处理微信消息失败:', error);
+    console.error('处理微信消息失败 - 错误类型:', error.constructor.name);
+    console.error('处理微信消息失败 - 错误信息:', error.message);
+    console.error('处理微信消息失败 - 完整错误:', error);
+    console.error('处理微信消息失败 - 原始消息:', message ? message.substring(0, 200) : 'null');
     return null;
   }
 }
