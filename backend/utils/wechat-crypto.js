@@ -34,6 +34,25 @@ class WeChatCrypto {
   }
 
   /**
+   * 生成签名 - 用于被动回复
+   */
+  generateSignature(timestamp, nonce, encrypt) {
+    const tmpArr = [this.token, timestamp, nonce, encrypt].sort();
+    const tmpStr = tmpArr.join('');
+    const hash = crypto.createHash('sha1').update(tmpStr).digest('hex');
+    console.log('生成签名详情:', {
+      token: this.token,
+      timestamp,
+      nonce,
+      encrypt_length: encrypt.length,
+      sorted_array: tmpArr,
+      joined_string: tmpStr,
+      generated_hash: hash
+    });
+    return hash;
+  }
+
+  /**
    * 解密消息 - 按照企业微信官方规范
    * 格式：random(16字节) + msg_len(4字节) + msg + $CorpId
    */
