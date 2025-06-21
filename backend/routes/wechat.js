@@ -27,6 +27,23 @@ let customerMessages = [];
 // 存储处理日志
 let processingLogs = [];
 
+// 添加处理日志
+function addProcessingLog(type, message, data = null) {
+  const log = {
+    timestamp: new Date().toISOString(),
+    type: type,
+    message: message,
+    data: data
+  };
+  
+  processingLogs.unshift(log);
+  if (processingLogs.length > 20) {
+    processingLogs = processingLogs.slice(0, 20);
+  }
+  
+  console.log(`[${type}] ${message}`, data ? JSON.stringify(data).substring(0, 100) : '');
+}
+
 // 微信回调处理
 router.all('/callback', async (req, res) => {
   try {
@@ -120,14 +137,17 @@ router.all('/callback', async (req, res) => {
 
       // 解密消息
       try {
-        console.log('开始解密消息...');
-        console.log('加密消息长度:', encryptedMsg.length);
-        console.log('时间戳:', timestamp);
-        console.log('随机数:', nonce);
+        addProcessingLog('DECRYPT', '开始解密消息', { 
+          encryptedLength: encryptedMsg.length, 
+          timestamp, 
+          nonce 
+        });
         
         const decryptedMsg = crypto.decrypt(encryptedMsg);
-        console.log('解密成功！消息长度:', decryptedMsg.length);
-        console.log('解密后的消息内容:', decryptedMsg);
+        addProcessingLog('DECRYPT', '解密成功', { 
+          decryptedLength: decryptedMsg.length,
+          content: decryptedMsg.substring(0, 200)
+        });
 
         // 处理消息并获取回复内容
         console.log('开始处理解密后的消息...');
@@ -141,10 +161,11 @@ router.all('/callback', async (req, res) => {
           return res.send('success');
         }
       } catch (decryptError) {
-        console.error('解密消息失败 - 错误类型:', decryptError.constructor.name);
-        console.error('解密消息失败 - 错误信息:', decryptError.message);
-        console.error('解密消息失败 - 完整错误:', decryptError);
-        console.error('加密消息内容:', encryptedMsg.substring(0, 100) + '...');
+        addProcessingLog('ERROR', '解密消息失败', {
+          errorType: decryptError.constructor.name,
+          errorMessage: decryptError.message,
+          encryptedContent: encryptedMsg.substring(0, 100)
+        });
         return res.status(500).send('解密失败');
       }
     }
@@ -538,6 +559,17 @@ router.get('/debug/customer-messages', (req, res) => {
     status: '消息记录服务正常',
     timestamp: new Date().toISOString(),
     message: customerMessages.length > 0 ? `已记录 ${customerMessages.length} 条客服消息` : '暂无客服消息记录'
+  });
+});
+
+// 调试接口：查看处理日志
+router.get('/debug/processing-logs', (req, res) => {
+  res.json({
+    processing_logs: processingLogs,
+    log_count: processingLogs.length,
+    status: '日志记录服务正常',
+    timestamp: new Date().toISOString(),
+    message: processingLogs.length > 0 ? `已记录 ${processingLogs.length} 条处理日志` : '暂无处理日志'
   });
 });
 
