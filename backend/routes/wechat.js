@@ -117,11 +117,15 @@ router.all('/callback', async (req, res) => {
         const decryptedMsg = crypto.decrypt(encryptedMsg);
         console.log('解密后的消息:', decryptedMsg);
 
-        // 处理消息（这里可以添加具体的业务逻辑）
-        await handleWeChatMessage(decryptedMsg);
-
-        // 返回success
-        return res.send('success');
+        // 处理消息并获取回复内容
+        const replyXml = await handleWeChatMessage(decryptedMsg, timestamp, nonce);
+        
+        // 如果有回复内容，返回加密的回复；否则返回success
+        if (replyXml) {
+          return res.send(replyXml);
+        } else {
+          return res.send('success');
+        }
       } catch (decryptError) {
         console.error('解密消息失败:', decryptError);
         return res.status(500).send('解密失败');
@@ -136,7 +140,7 @@ router.all('/callback', async (req, res) => {
 });
 
 // 处理微信消息的业务逻辑
-async function handleWeChatMessage(message) {
+async function handleWeChatMessage(message, timestamp, nonce) {
   try {
     console.log('处理微信消息:', message);
     
@@ -144,13 +148,50 @@ async function handleWeChatMessage(message) {
     const messageData = parseWeChatMessage(message);
     console.log('解析后的消息数据:', messageData);
     
-    // 如果是文本消息，自动回复
+    // 如果是文本消息，构建被动回复
     if (messageData && messageData.MsgType === 'text') {
-      await sendAutoReply(messageData.FromUserName);
+      console.log('收到文本消息，准备被动回复...');
+      
+      // 构建回复消息XML
+      const replyContent = '好的收到，我们的客服会尽快为您处理！';
+      const replyTime = Math.floor(Date.now() / 1000);
+      
+      const replyXml = `<xml>
+<ToUserName><![CDATA[${messageData.FromUserName}]]></ToUserName>
+<FromUserName><![CDATA[${messageData.ToUserName}]]></FromUserName>
+<CreateTime>${replyTime}</CreateTime>
+<MsgType><![CDATA[text]]></MsgType>
+<Content><![CDATA[${replyContent}]]></Content>
+</xml>`;
+      
+      console.log('构建的回复XML:', replyXml);
+      
+      // 加密回复消息
+      try {
+        const encryptedReply = crypto.encrypt(replyXml);
+        const signature = crypto.generateSignature(timestamp, nonce, encryptedReply);
+        
+        const responseXml = `<xml>
+<Encrypt><![CDATA[${encryptedReply}]]></Encrypt>
+<MsgSignature><![CDATA[${signature}]]></MsgSignature>
+<TimeStamp>${timestamp}</TimeStamp>
+<Nonce><![CDATA[${nonce}]]></Nonce>
+</xml>`;
+        
+        console.log('加密后的回复XML已生成');
+        return responseXml;
+        
+      } catch (encryptError) {
+        console.error('加密回复消息失败:', encryptError);
+        return null;
+      }
     }
+    
+    return null; // 不回复
     
   } catch (error) {
     console.error('处理微信消息失败:', error);
+    return null;
   }
 }
 
@@ -182,49 +223,19 @@ function parseWeChatMessage(xmlString) {
   }
 }
 
-// 发送自动回复
+// 发送自动回复给微信用户（使用被动回复）
 async function sendAutoReply(fromUser) {
   try {
-    console.log('准备发送自动回复给用户:', fromUser);
+    console.log('准备发送自动回复给微信用户:', fromUser);
     
-    // 获取access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
-    const tokenData = await tokenResponse.json();
+    // 注意：对于微信客服场景，我们需要使用被动回复或客服接口
+    // 当前的企业微信应用API只能发送给企业内部用户，不能回复微信用户
+    // 真正的微信客服回复需要在handleWeChatMessage中直接返回XML格式的回复
     
-    if (tokenData.errcode !== 0) {
-      console.error('获取access_token失败:', tokenData);
-      return;
-    }
-
-    // 构建自动回复消息
-    const replyMessage = {
-      touser: fromUser,
-      agentid: WECHAT_CONFIG.agentId,
-      msgtype: 'text',
-      text: {
-        content: '好的收到，我们的客服会尽快为您处理'
-      }
-    };
-
-    // 发送回复消息
-    const sendResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${tokenData.access_token}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(replyMessage)
-    });
-
-    const sendData = await sendResponse.json();
+    console.log('微信客服消息已接收，如需自动回复请使用被动回复机制');
     
-    if (sendData.errcode === 0) {
-      console.log('自动回复发送成功:', sendData);
-    } else {
-      console.error('自动回复发送失败:', sendData);
-    }
-
   } catch (error) {
-    console.error('发送自动回复失败:', error);
+    console.error('处理自动回复失败:', error);
   }
 }
 
