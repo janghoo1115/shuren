@@ -21,6 +21,9 @@ const crypto = new WeChatCrypto(
 // 存储最近的回调请求（用于调试）
 let recentCallbacks = [];
 
+// 存储接收到的客服消息
+let customerMessages = [];
+
 // 微信回调处理
 router.all('/callback', async (req, res) => {
   try {
@@ -153,12 +156,37 @@ async function handleWeChatMessage(message, timestamp, nonce) {
       console.log('收到文本消息:', messageData.Content);
       console.log('发送者:', messageData.FromUserName);
       
-      // 通知企业微信用户有新的客服消息
-      try {
-        await notifyCustomerServiceMessage(messageData);
-      } catch (error) {
-        console.error('通知客服失败:', error);
+      // 记录客服消息
+      const customerMessage = {
+        timestamp: new Date().toISOString(),
+        fromUser: messageData.FromUserName,
+        toUser: messageData.ToUserName,
+        content: messageData.Content,
+        msgId: messageData.MsgId,
+        msgType: messageData.MsgType,
+        createTime: messageData.CreateTime
+      };
+      
+      // 保存最近10条客服消息
+      customerMessages.unshift(customerMessage);
+      if (customerMessages.length > 10) {
+        customerMessages = customerMessages.slice(0, 10);
       }
+      
+      console.log('=== 客服消息记录 ===');
+      console.log('时间:', customerMessage.timestamp);
+      console.log('发送者:', customerMessage.fromUser);
+      console.log('接收者:', customerMessage.toUser);
+      console.log('消息内容:', customerMessage.content);
+      console.log('消息ID:', customerMessage.msgId);
+      console.log('=====================');
+      
+      // 暂时注释掉通知功能，因为权限不足
+      // try {
+      //   await notifyCustomerServiceMessage(messageData);
+      // } catch (error) {
+      //   console.error('通知客服失败:', error);
+      // }
     }
     
     return null; // 不回复
@@ -468,6 +496,17 @@ router.get('/debug/recent-callbacks', (req, res) => {
     status: '服务正常运行',
     timestamp: new Date().toISOString(),
     message: recentCallbacks.length > 0 ? '有回调记录' : '暂无回调记录，请检查企微配置'
+  });
+});
+
+// 调试接口：查看接收到的客服消息
+router.get('/debug/customer-messages', (req, res) => {
+  res.json({
+    customer_messages: customerMessages,
+    message_count: customerMessages.length,
+    status: '消息记录服务正常',
+    timestamp: new Date().toISOString(),
+    message: customerMessages.length > 0 ? `已记录 ${customerMessages.length} 条客服消息` : '暂无客服消息记录'
   });
 });
 
