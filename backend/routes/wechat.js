@@ -27,6 +27,9 @@ let customerMessages = [];
 // 存储处理日志
 let processingLogs = [];
 
+// 存储用户最后回复时间（防止重复回复）
+let userLastReplyTime = new Map();
+
 // 添加处理日志
 function addProcessingLog(type, message, data = null) {
   const log = {
@@ -43,6 +46,20 @@ function addProcessingLog(type, message, data = null) {
   
   console.log(`[${type}] ${message}`, data ? JSON.stringify(data).substring(0, 100) : '');
 }
+
+// 清理过期的用户回复时间记录（每10分钟清理一次）
+setInterval(() => {
+  const now = Date.now();
+  const expireTime = 30 * 60 * 1000; // 30分钟过期
+  
+  for (const [userId, lastTime] of userLastReplyTime.entries()) {
+    if (now - lastTime > expireTime) {
+      userLastReplyTime.delete(userId);
+    }
+  }
+  
+  console.log(`清理过期用户回复记录，当前记录数: ${userLastReplyTime.size}`);
+}, 10 * 60 * 1000);
 
 // 微信回调处理
 router.all('/callback', async (req, res) => {
@@ -489,38 +506,64 @@ async function processKfUserMessage(msg, accessToken) {
     if (msg.msgtype === 'text') {
       console.log('消息内容:', msg.text.content);
       
-      // 发送自动回复
-      const replyData = {
-        touser: msg.external_userid,
-        open_kfid: msg.open_kfid,
-        msgtype: 'text',
-        text: {
-          content: '您好！我们已收到您的消息，客服人员会尽快为您处理，请稍候！'
-        }
-      };
-      
-      const replyResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${accessToken}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(replyData)
+      // 记录消息内容到日志
+      addProcessingLog('KF', '用户发送的消息内容', {
+        content: msg.text.content,
+        msgid: msg.msgid,
+        external_userid: msg.external_userid
       });
       
-      const replyResult = await replyResponse.json();
+      // 检查是否需要发送自动回复（防止频繁回复）
+      const now = Date.now();
+      const lastReplyTime = userLastReplyTime.get(msg.external_userid);
+      const replyInterval = 10000; // 10秒内不重复回复
       
-      if (replyResult.errcode === 0) {
-        addProcessingLog('KF', '自动回复发送成功', {
-          msgid: replyResult.msgid,
-          external_userid: msg.external_userid
+      if (!lastReplyTime || (now - lastReplyTime) > replyInterval) {
+        // 发送自动回复（包含用户发送的消息内容）
+        const replyData = {
+          touser: msg.external_userid,
+          open_kfid: msg.open_kfid,
+          msgtype: 'text',
+          text: {
+            content: `收到您的消息："${msg.text.content}"，是的长官！`
+          }
+        };
+        
+        const replyResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${accessToken}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(replyData)
         });
-        console.log('自动回复发送成功！消息ID:', replyResult.msgid);
+        
+        const replyResult = await replyResponse.json();
+        
+        if (replyResult.errcode === 0) {
+          // 更新最后回复时间
+          userLastReplyTime.set(msg.external_userid, now);
+          
+          addProcessingLog('KF', '自动回复发送成功', {
+            msgid: replyResult.msgid,
+            external_userid: msg.external_userid,
+            user_message: msg.text.content,
+            reply_content: `收到您的消息："${msg.text.content}"，是的长官！`
+          });
+          console.log('自动回复发送成功！消息ID:', replyResult.msgid);
+        } else {
+          addProcessingLog('ERROR', '自动回复发送失败', {
+            errcode: replyResult.errcode,
+            errmsg: replyResult.errmsg
+          });
+          console.error('自动回复发送失败:', replyResult);
+        }
       } else {
-        addProcessingLog('ERROR', '自动回复发送失败', {
-          errcode: replyResult.errcode,
-          errmsg: replyResult.errmsg
+        addProcessingLog('KF', '跳过自动回复（频率限制）', {
+          external_userid: msg.external_userid,
+          last_reply_ago: Math.round((now - lastReplyTime) / 1000) + '秒前',
+          interval_limit: replyInterval / 1000 + '秒'
         });
-        console.error('自动回复发送失败:', replyResult);
+        console.log(`用户 ${msg.external_userid} 在${Math.round((now - lastReplyTime) / 1000)}秒前已回复过，跳过本次回复`);
       }
     }
     
@@ -867,6 +910,34 @@ router.get('/debug/kf-logs', (req, res) => {
     timestamp: new Date().toISOString(),
     message: kfLogs.length > 0 ? `已记录 ${kfLogs.length} 条微信客服处理日志` : '暂无微信客服处理日志'
   });
+});
+
+// 调试接口：手动同步最近的客服消息
+router.get('/debug/sync-recent-messages/:token?', async (req, res) => {
+  try {
+    const token = req.params.token || req.query.token;
+    
+    if (!token) {
+      return res.status(400).json({ 
+        error: '需要提供token参数',
+        usage: '/debug/sync-recent-messages/{token} 或 /debug/sync-recent-messages?token={token}'
+      });
+    }
+    
+    await handleKfMessage(token);
+    
+    res.json({
+      success: true,
+      message: '已触发消息同步，请查看处理日志',
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      error: '同步消息失败',
+      message: error.message
+    });
+  }
 });
 
 // 调试接口：查看客服账号信息
