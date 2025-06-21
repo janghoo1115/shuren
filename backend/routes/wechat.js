@@ -486,12 +486,19 @@ router.get('/kf/access-token', async (req, res) => {
       res.status(400).json({ 
         error: data.errmsg, 
         errcode: data.errcode,
-        hint: '请检查是否配置了正确的应用密钥(WECHAT_CORP_SECRET)'
+        hint: '请检查是否配置了正确的应用密钥(WECHAT_CORP_SECRET)',
+        corpId: WECHAT_CONFIG.corpId ? '已配置' : '未配置',
+        corpSecret: WECHAT_CONFIG.corpSecret ? '已配置' : '未配置'
       });
     }
   } catch (error) {
     console.error('获取客服access_token失败:', error);
-    res.status(500).json({ error: '获取客服access_token失败' });
+    res.status(500).json({ 
+      error: '获取客服access_token失败',
+      details: error.message,
+      corpId: WECHAT_CONFIG.corpId ? '已配置' : '未配置',
+      corpSecret: WECHAT_CONFIG.corpSecret ? '已配置' : '未配置'
+    });
   }
 });
 
