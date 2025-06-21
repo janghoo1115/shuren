@@ -8,8 +8,7 @@ const WECHAT_CONFIG = {
   encodingAESKey: process.env.WECHAT_ENCODING_AES_KEY,
   corpId: process.env.WECHAT_CORP_ID,
   agentId: process.env.WECHAT_AGENT_ID,
-  corpSecret: process.env.WECHAT_CORP_SECRET || process.env.WECHAT_SECRET,
-  kfSecret: process.env.WECHAT_KF_SECRET || process.env.WECHAT_CORP_SECRET || process.env.WECHAT_SECRET
+  corpSecret: process.env.WECHAT_CORP_SECRET || process.env.WECHAT_SECRET
 };
 
 // 创建加密工具实例
@@ -473,8 +472,8 @@ router.get('/debug/test-message/:userid', async (req, res) => {
 // 获取客服接口凭证
 router.get('/kf/access-token', async (req, res) => {
   try {
-    // 使用客服专用密钥
-    const response = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    // 使用应用secret获取客服接口凭证
+    const response = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const data = await response.json();
     
     if (data.errcode === 0) {
@@ -487,7 +486,7 @@ router.get('/kf/access-token', async (req, res) => {
       res.status(400).json({ 
         error: data.errmsg, 
         errcode: data.errcode,
-        hint: '请检查是否配置了正确的客服密钥(WECHAT_KF_SECRET)'
+        hint: '请检查是否配置了正确的应用密钥(WECHAT_CORP_SECRET)'
       });
     }
   } catch (error) {
@@ -709,7 +708,7 @@ async function sendKfAutoReply(fromUser, openKfId) {
     
          // 尝试获取客服access_token
      try {
-       const kfTokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+       const kfTokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
        const kfTokenData = await kfTokenResponse.json();
       
       if (kfTokenData.errcode === 0) {
@@ -795,7 +794,7 @@ async function sendKfAutoReply(fromUser, openKfId) {
 router.get('/kf/account/list', async (req, res) => {
   try {
     // 获取客服access_token
-    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
     
     if (tokenData.errcode !== 0) {
@@ -1218,7 +1217,7 @@ router.get('/kf/test', (req, res) => {
             </div>
             <div class="form-group">
                 <label>客服账号ID (open_kfid):</label>
-                <input type="text" id="state-kfid" placeholder="客服账号的open_kfid">
+                <input type="text" id="state-kfid" placeholder="客服账号的open_kfid" value="kfca677d36885794305">
             </div>
             <button onclick="getServiceState()">获取会话状态</button>
             <div id="state-result"></div>
@@ -1233,7 +1232,7 @@ router.get('/kf/test', (req, res) => {
             </div>
             <div class="form-group">
                 <label>客服账号ID (open_kfid):</label>
-                <input type="text" id="trans-kfid" placeholder="客服账号的open_kfid">
+                <input type="text" id="trans-kfid" placeholder="客服账号的open_kfid" value="kfca677d36885794305">
             </div>
             <div class="form-group">
                 <label>目标状态:</label>
@@ -1389,6 +1388,49 @@ router.get('/kf/test', (req, res) => {
   res.send(html);
 });
 
+// 获取企业用户列表
+router.get('/users', async (req, res) => {
+  try {
+    // 获取access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取access_token失败', details: tokenData });
+    }
+
+    // 获取用户列表
+    const usersResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/user/list?access_token=${tokenData.access_token}&department_id=1`);
+    const usersData = await usersResponse.json();
+    
+    if (usersData.errcode === 0) {
+      const userList = usersData.userlist.map(user => ({
+        userid: user.userid,
+        name: user.name,
+        position: user.position || '未设置',
+        department: user.department || [],
+        mobile: user.mobile || '未设置'
+      }));
+      
+      res.json({
+        success: true,
+        users: userList,
+        total: userList.length,
+        message: '企业用户列表（请使用userid字段作为发送消息的目标）'
+      });
+    } else {
+      res.status(400).json({ 
+        error: '获取用户列表失败', 
+        details: usersData 
+      });
+    }
+
+  } catch (error) {
+    console.error('获取用户列表失败:', error);
+    res.status(500).json({ error: '获取用户列表失败', message: error.message });
+  }
+});
+
 // 检查服务器IP地址
 router.get('/check-ip', async (req, res) => {
   try {
@@ -1409,6 +1451,1020 @@ router.get('/check-ip', async (req, res) => {
       message: error.message
     });
   }
+});
+
+// === 客服账号管理 ===
+
+// 新增客服账号
+router.post('/kf/account/add', async (req, res) => {
+  try {
+    const { name, media_id } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: '参数不完整', required: 'name' });
+    }
+
+    // 获取客服 access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    // 调用创建接口
+    const addResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/account/add?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(media_id ? { name, media_id } : { name })
+    });
+
+    const addData = await addResponse.json();
+
+    if (addData.errcode === 0) {
+      res.json({ success: true, message: '客服账号创建成功', open_kfid: addData.open_kfid, details: addData });
+    } else {
+      res.status(400).json({ error: '客服账号创建失败', details: addData });
+    }
+  } catch (error) {
+    console.error('创建客服账号失败:', error);
+    res.status(500).json({ error: '创建客服账号失败', message: error.message });
+  }
+});
+
+// 更新客服账号名称
+router.post('/kf/account/update', async (req, res) => {
+  try {
+    const { open_kfid, name } = req.body;
+
+    if (!open_kfid || !name) {
+      return res.status(400).json({ error: '参数不完整', required: 'open_kfid, name' });
+    }
+
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    const updateResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/account/update?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, open_kfid })
+    });
+
+    const updateData = await updateResponse.json();
+
+    if (updateData.errcode === 0) {
+      res.json({ success: true, message: '客服账号更新成功', details: updateData });
+    } else {
+      res.status(400).json({ error: '客服账号更新失败', details: updateData });
+    }
+  } catch (error) {
+    console.error('更新客服账号失败:', error);
+    res.status(500).json({ error: '更新客服账号失败', message: error.message });
+  }
+});
+
+// 删除客服账号
+router.post('/kf/account/del', async (req, res) => {
+  try {
+    const { open_kfid } = req.body;
+
+    if (!open_kfid) {
+      return res.status(400).json({ error: '参数不完整', required: 'open_kfid' });
+    }
+
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    const delResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/account/del?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ open_kfid })
+    });
+
+    const delData = await delResponse.json();
+
+    if (delData.errcode === 0) {
+      res.json({ success: true, message: '客服账号删除成功', details: delData });
+    } else {
+      res.status(400).json({ error: '客服账号删除失败', details: delData });
+    }
+  } catch (error) {
+    console.error('删除客服账号失败:', error);
+    res.status(500).json({ error: '删除客服账号失败', message: error.message });
+  }
+});
+
+// 邀请绑定客服人员
+router.post('/kf/account/invite', async (req, res) => {
+  try {
+    const { open_kfid, wxid } = req.body;
+
+    if (!open_kfid || !wxid) {
+      return res.status(400).json({ error: '参数不完整', required: 'open_kfid, wxid' });
+    }
+
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    const inviteResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/account/bind?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ open_kfid, wxid })
+    });
+
+    const inviteData = await inviteResponse.json();
+
+    if (inviteData.errcode === 0) {
+      res.json({ success: true, message: '邀请发送成功', details: inviteData });
+    } else {
+      res.status(400).json({ error: '邀请失败', details: inviteData });
+    }
+  } catch (error) {
+    console.error('邀请绑定客服人员失败:', error);
+    res.status(500).json({ error: '邀请绑定客服人员失败', message: error.message });
+  }
+});
+
+// 上传客服账号头像
+router.post('/kf/account/upload-avatar', async (req, res) => {
+  try {
+    const { open_kfid, avatar_url } = req.body;
+
+    if (!open_kfid || !avatar_url) {
+      return res.status(400).json({ error: '参数不完整', required: 'open_kfid, avatar_url' });
+    }
+
+    // 获取客服 access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    // 企业微信官方接口目前需要上传文件，此处根据官方文档支持通过 URL 设置头像
+    const uploadResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/account/uploadheadimg?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ open_kfid, avatar_url })
+    });
+
+    const uploadData = await uploadResponse.json();
+
+    if (uploadData.errcode === 0) {
+      res.json({ success: true, message: '头像设置成功', details: uploadData });
+    } else {
+      res.status(400).json({ error: '头像设置失败', details: uploadData });
+    }
+  } catch (error) {
+    console.error('上传客服头像失败:', error);
+    res.status(500).json({ error: '上传客服头像失败', message: error.message });
+  }
+});
+
+// === 接待人员管理 ===
+
+// 添加接待人员
+router.post('/kf/servicer/add', async (req, res) => {
+  try {
+    const { open_kfid, userid_list, department_id_list } = req.body;
+
+    if (!open_kfid || (!userid_list && !department_id_list)) {
+      return res.status(400).json({ 
+        error: '参数不完整', 
+        required: 'open_kfid 和至少一个 userid_list 或 department_id_list' 
+      });
+    }
+
+    // 获取客服 access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    // 构建请求体
+    const requestBody = { open_kfid };
+    if (userid_list && userid_list.length > 0) {
+      requestBody.userid_list = userid_list;
+    }
+    if (department_id_list && department_id_list.length > 0) {
+      requestBody.department_id_list = department_id_list;
+    }
+
+    // 调用添加接待人员接口
+    const addResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/servicer/add?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+
+    const addData = await addResponse.json();
+
+    if (addData.errcode === 0) {
+      res.json({ 
+        success: true, 
+        message: '接待人员添加成功', 
+        result_list: addData.result_list,
+        details: addData 
+      });
+    } else {
+      res.status(400).json({ error: '接待人员添加失败', details: addData });
+    }
+  } catch (error) {
+    console.error('添加接待人员失败:', error);
+    res.status(500).json({ error: '添加接待人员失败', message: error.message });
+  }
+});
+
+// 删除接待人员
+router.post('/kf/servicer/del', async (req, res) => {
+  try {
+    const { open_kfid, userid_list, department_id_list } = req.body;
+
+    if (!open_kfid || (!userid_list && !department_id_list)) {
+      return res.status(400).json({ 
+        error: '参数不完整', 
+        required: 'open_kfid 和至少一个 userid_list 或 department_id_list' 
+      });
+    }
+
+    // 获取客服 access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    // 构建请求体
+    const requestBody = { open_kfid };
+    if (userid_list && userid_list.length > 0) {
+      requestBody.userid_list = userid_list;
+    }
+    if (department_id_list && department_id_list.length > 0) {
+      requestBody.department_id_list = department_id_list;
+    }
+
+    // 调用删除接待人员接口
+    const delResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/servicer/del?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+
+    const delData = await delResponse.json();
+
+    if (delData.errcode === 0) {
+      res.json({ 
+        success: true, 
+        message: '接待人员删除成功', 
+        result_list: delData.result_list,
+        details: delData 
+      });
+    } else {
+      res.status(400).json({ error: '接待人员删除失败', details: delData });
+    }
+  } catch (error) {
+    console.error('删除接待人员失败:', error);
+    res.status(500).json({ error: '删除接待人员失败', message: error.message });
+  }
+});
+
+// 获取接待人员列表
+router.get('/kf/servicer/list', async (req, res) => {
+  try {
+    const { open_kfid } = req.query;
+
+    if (!open_kfid) {
+      return res.status(400).json({ error: '参数不完整', required: 'open_kfid' });
+    }
+
+    // 获取客服 access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    // 获取接待人员列表
+    const listResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/servicer/list?access_token=${tokenData.access_token}&open_kfid=${open_kfid}`);
+    const listData = await listResponse.json();
+
+    if (listData.errcode === 0) {
+      res.json({
+        success: true,
+        servicer_list: listData.servicer_list || [],
+        total: listData.servicer_list ? listData.servicer_list.length : 0,
+        details: listData
+      });
+    } else {
+      res.status(400).json({ error: '获取接待人员列表失败', details: listData });
+    }
+  } catch (error) {
+    console.error('获取接待人员列表失败:', error);
+    res.status(500).json({ error: '获取接待人员列表失败', message: error.message });
+  }
+});
+
+// === 消息同步和读取 ===
+
+// 同步读取消息
+router.post('/kf/sync-msg', async (req, res) => {
+  try {
+    const { cursor, token, limit = 1000, voice_format = 0, open_kfid } = req.body;
+
+    // 获取客服 access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    // 构建同步消息请求
+    const syncRequest = {
+      limit: Math.min(limit, 1000), // 最大值1000
+      voice_format
+    };
+
+    // 可选参数
+    if (cursor) syncRequest.cursor = cursor;
+    if (token) syncRequest.token = token;
+    if (open_kfid) syncRequest.open_kfid = open_kfid;
+
+    // 调用同步消息接口
+    const syncResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(syncRequest)
+    });
+
+    const syncData = await syncResponse.json();
+
+    if (syncData.errcode === 0) {
+      res.json({
+        success: true,
+        next_cursor: syncData.next_cursor,
+        has_more: syncData.has_more,
+        msg_list: syncData.msg_list || [],
+        total_count: syncData.msg_list ? syncData.msg_list.length : 0,
+        details: syncData
+      });
+    } else {
+      res.status(400).json({ error: '同步消息失败', details: syncData });
+    }
+  } catch (error) {
+    console.error('同步消息失败:', error);
+    res.status(500).json({ error: '同步消息失败', message: error.message });
+  }
+});
+
+// 发送事件响应消息（欢迎语、结束语等）
+router.post('/kf/send-event-msg', async (req, res) => {
+  try {
+    const { code, msgtype, ...msgContent } = req.body;
+
+    if (!code || !msgtype) {
+      return res.status(400).json({ 
+        error: '参数不完整', 
+        required: 'code, msgtype' 
+      });
+    }
+
+    // 获取客服 access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    // 构建消息体
+    const messageBody = {
+      code,
+      msgtype
+    };
+
+    // 根据消息类型构建不同的消息内容
+    switch (msgtype) {
+      case 'text':
+        if (!msgContent.content) {
+          return res.status(400).json({ error: '文本消息需要content参数' });
+        }
+        messageBody.text = { content: msgContent.content };
+        break;
+        
+      case 'image':
+        if (!msgContent.media_id) {
+          return res.status(400).json({ error: '图片消息需要media_id参数' });
+        }
+        messageBody.image = { media_id: msgContent.media_id };
+        break;
+        
+      case 'voice':
+        if (!msgContent.media_id) {
+          return res.status(400).json({ error: '语音消息需要media_id参数' });
+        }
+        messageBody.voice = { media_id: msgContent.media_id };
+        break;
+        
+      case 'video':
+        if (!msgContent.media_id) {
+          return res.status(400).json({ error: '视频消息需要media_id参数' });
+        }
+        messageBody.video = { media_id: msgContent.media_id };
+        break;
+        
+      case 'file':
+        if (!msgContent.media_id) {
+          return res.status(400).json({ error: '文件消息需要media_id参数' });
+        }
+        messageBody.file = { media_id: msgContent.media_id };
+        break;
+        
+      case 'msgmenu':
+        if (!msgContent.list || !Array.isArray(msgContent.list)) {
+          return res.status(400).json({ error: '菜单消息需要list参数（数组）' });
+        }
+        messageBody.msgmenu = {
+          head_content: msgContent.head_content || '',
+          list: msgContent.list,
+          tail_content: msgContent.tail_content || ''
+        };
+        break;
+        
+      default:
+        return res.status(400).json({ 
+          error: '不支持的消息类型', 
+          supported: ['text', 'image', 'voice', 'video', 'file', 'msgmenu']
+        });
+    }
+
+    // 发送事件响应消息
+    const sendResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg_on_event?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(messageBody)
+    });
+
+    const sendData = await sendResponse.json();
+
+    if (sendData.errcode === 0) {
+      res.json({
+        success: true,
+        message: '事件响应消息发送成功',
+        msgid: sendData.msgid,
+        details: sendData
+      });
+    } else {
+      res.status(400).json({ 
+        error: '事件响应消息发送失败', 
+        details: sendData 
+      });
+    }
+  } catch (error) {
+    console.error('发送事件响应消息失败:', error);
+    res.status(500).json({ error: '发送事件响应消息失败', message: error.message });
+  }
+});
+
+// 获取客户基础信息
+router.get('/kf/customer/info', async (req, res) => {
+  try {
+    const { external_userid, need_enter_session_context = 0 } = req.query;
+
+    if (!external_userid) {
+      return res.status(400).json({ error: '参数不完整', required: 'external_userid' });
+    }
+
+    // 获取客服 access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    // 获取客户基础信息
+    const infoResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/customer/batchget?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        external_userid_list: [external_userid],
+        need_enter_session_context: parseInt(need_enter_session_context)
+      })
+    });
+
+    const infoData = await infoResponse.json();
+
+    if (infoData.errcode === 0) {
+      const customerInfo = infoData.customer_list && infoData.customer_list.length > 0 
+        ? infoData.customer_list[0] 
+        : null;
+
+      res.json({
+        success: true,
+        customer_info: customerInfo,
+        details: infoData
+      });
+    } else {
+      res.status(400).json({ error: '获取客户信息失败', details: infoData });
+    }
+  } catch (error) {
+    console.error('获取客户信息失败:', error);
+    res.status(500).json({ error: '获取客户信息失败', message: error.message });
+  }
+});
+
+// 获取客服账号链接（用于生成专属的客服链接）
+router.get('/kf/account/link', async (req, res) => {
+  try {
+    const { open_kfid, scene = '' } = req.query;
+
+    if (!open_kfid) {
+      return res.status(400).json({ error: '参数不完整', required: 'open_kfid' });
+    }
+
+    // 获取客服 access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/token?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.kfSecret}`);
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取客服access_token失败', details: tokenData });
+    }
+
+    // 获取客服账号链接
+    const linkResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/add_contact_way?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        open_kfid,
+        scene
+      })
+    });
+
+    const linkData = await linkResponse.json();
+
+    if (linkData.errcode === 0) {
+      res.json({
+        success: true,
+        url: linkData.url,
+        details: linkData
+      });
+    } else {
+      res.status(400).json({ error: '获取客服账号链接失败', details: linkData });
+    }
+  } catch (error) {
+    console.error('获取客服账号链接失败:', error);
+    res.status(500).json({ error: '获取客服账号链接失败', message: error.message });
+  }
+});
+
+// === 客服完整测试页面 ===
+router.get('/kf/test-complete', (req, res) => {
+  const html = `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业微信客服完整功能测试</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #1976d2; text-align: center; margin-bottom: 30px; }
+        .section { margin-bottom: 30px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px; }
+        .section h3 { color: #333; margin-top: 0; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        input, textarea, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { background: #1976d2; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; margin-bottom: 10px; }
+        button:hover { background: #1565c0; }
+        .result { margin-top: 15px; padding: 10px; border-radius: 4px; background: #f8f9fa; border-left: 4px solid #28a745; }
+        .error { border-left-color: #dc3545; background: #f8d7da; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; max-height: 300px; }
+        .row { display: flex; gap: 20px; }
+        .col { flex: 1; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 企业微信客服完整功能测试</h1>
+        
+        <!-- 客服账号管理 -->
+        <div class="section">
+            <h3>📋 1. 客服账号管理</h3>
+            <div class="row">
+                <div class="col">
+                    <h4>获取客服账号列表</h4>
+                    <button onclick="getKfAccounts()">获取客服账号列表</button>
+                    <div id="accounts-result"></div>
+                </div>
+                <div class="col">
+                    <h4>创建客服账号</h4>
+                    <div class="form-group">
+                        <label>客服账号名称:</label>
+                        <input type="text" id="account-name" placeholder="客服名称">
+                    </div>
+                    <button onclick="addKfAccount()">创建客服账号</button>
+                    <div id="add-account-result"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 接待人员管理 -->
+        <div class="section">
+            <h3>👨‍💼 2. 接待人员管理</h3>
+            <div class="row">
+                <div class="col">
+                    <h4>添加接待人员</h4>
+                    <div class="form-group">
+                        <label>客服账号ID (open_kfid):</label>
+                        <input type="text" id="servicer-kfid" placeholder="客服账号的open_kfid" value="kfca677d36885794305">
+                    </div>
+                    <div class="form-group">
+                        <label>员工ID列表 (用逗号分隔):</label>
+                        <input type="text" id="servicer-userids" placeholder="如: zhangsan,lisi">
+                    </div>
+                    <button onclick="addServicer()">添加接待人员</button>
+                    <div id="servicer-add-result"></div>
+                </div>
+                <div class="col">
+                    <h4>获取接待人员列表</h4>
+                    <div class="form-group">
+                        <label>客服账号ID (open_kfid):</label>
+                        <input type="text" id="list-kfid" placeholder="客服账号的open_kfid" value="kfca677d36885794305">
+                    </div>
+                    <button onclick="getServicerList()">获取接待人员列表</button>
+                    <div id="servicer-list-result"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 消息同步与发送 -->
+        <div class="section">
+            <h3>💬 3. 消息同步与发送</h3>
+            <div class="row">
+                <div class="col">
+                    <h4>同步拉取消息</h4>
+                    <div class="form-group">
+                        <label>客服账号ID (open_kfid, 可选):</label>
+                        <input type="text" id="sync-kfid" placeholder="指定客服账号" value="kfca677d36885794305">
+                    </div>
+                    <div class="form-group">
+                        <label>拉取数量:</label>
+                        <input type="number" id="sync-limit" value="100" min="1" max="1000">
+                    </div>
+                    <button onclick="syncMessages()">拉取消息</button>
+                    <div id="sync-result"></div>
+                </div>
+                <div class="col">
+                    <h4>发送客服消息</h4>
+                    <div class="form-group">
+                        <label>微信用户ID:</label>
+                        <input type="text" id="msg-touser" placeholder="external_userid">
+                    </div>
+                    <div class="form-group">
+                        <label>客服账号ID:</label>
+                        <input type="text" id="msg-kfid" placeholder="open_kfid" value="kfca677d36885794305">
+                    </div>
+                    <div class="form-group">
+                        <label>消息内容:</label>
+                        <textarea id="msg-content" rows="3" placeholder="消息内容"></textarea>
+                    </div>
+                    <button onclick="sendKfMessage()">发送消息</button>
+                    <div id="send-msg-result"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 会话状态管理 -->
+        <div class="section">
+            <h3>📊 4. 会话状态管理</h3>
+            <div class="row">
+                <div class="col">
+                    <h4>获取会话状态</h4>
+                    <div class="form-group">
+                        <label>微信用户ID:</label>
+                        <input type="text" id="session-userid" placeholder="external_userid">
+                    </div>
+                    <div class="form-group">
+                        <label>客服账号ID:</label>
+                        <input type="text" id="session-kfid" placeholder="open_kfid" value="kfca677d36885794305">
+                    </div>
+                    <button onclick="getSessionState()">获取会话状态</button>
+                    <div id="session-state-result"></div>
+                </div>
+                <div class="col">
+                    <h4>变更会话状态</h4>
+                    <div class="form-group">
+                        <label>微信用户ID:</label>
+                        <input type="text" id="trans-userid" placeholder="external_userid">
+                    </div>
+                    <div class="form-group">
+                        <label>客服账号ID:</label>
+                        <input type="text" id="trans-kfid" placeholder="open_kfid" value="kfca677d36885794305">
+                    </div>
+                    <div class="form-group">
+                        <label>目标状态:</label>
+                        <select id="trans-state">
+                            <option value="0">0 - 未处理</option>
+                            <option value="1">1 - 由智能助手接待</option>
+                            <option value="2">2 - 待接入池排队中</option>
+                            <option value="3">3 - 由人工接待</option>
+                            <option value="4">4 - 已结束/未开始</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>接待人员ID (状态为3时必填):</label>
+                        <input type="text" id="trans-servicer" placeholder="接待人员的userid">
+                    </div>
+                    <button onclick="transSessionState()">变更会话状态</button>
+                    <div id="trans-state-result"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 客户信息 -->
+        <div class="section">
+            <h3>👤 5. 客户信息管理</h3>
+            <div class="row">
+                <div class="col">
+                    <h4>获取客户基础信息</h4>
+                    <div class="form-group">
+                        <label>微信用户ID:</label>
+                        <input type="text" id="customer-userid" placeholder="external_userid">
+                    </div>
+                    <button onclick="getCustomerInfo()">获取客户信息</button>
+                    <div id="customer-info-result"></div>
+                </div>
+                <div class="col">
+                    <h4>获取客服账号链接</h4>
+                    <div class="form-group">
+                        <label>客服账号ID:</label>
+                        <input type="text" id="link-kfid" placeholder="open_kfid" value="kfca677d36885794305">
+                    </div>
+                    <div class="form-group">
+                        <label>场景值 (可选):</label>
+                        <input type="text" id="link-scene" placeholder="自定义场景值">
+                    </div>
+                    <button onclick="getKfLink()">获取客服链接</button>
+                    <div id="link-result"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 客服账号管理
+        async function getKfAccounts() {
+            try {
+                const response = await fetch('/api/wechat/kf/account/list');
+                const data = await response.json();
+                document.getElementById('accounts-result').innerHTML = 
+                    \`<div class="result"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('accounts-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+
+        async function addKfAccount() {
+            const name = document.getElementById('account-name').value;
+            if (!name) {
+                alert('请输入客服账号名称');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/wechat/kf/account/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const data = await response.json();
+                document.getElementById('add-account-result').innerHTML = 
+                    \`<div class="result \${data.success ? '' : 'error'}"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('add-account-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+
+        // 接待人员管理
+        async function addServicer() {
+            const open_kfid = document.getElementById('servicer-kfid').value;
+            const userids = document.getElementById('servicer-userids').value;
+            
+            if (!open_kfid || !userids) {
+                alert('请填写客服账号ID和员工ID');
+                return;
+            }
+
+            const userid_list = userids.split(',').map(id => id.trim()).filter(id => id);
+
+            try {
+                const response = await fetch('/api/wechat/kf/servicer/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ open_kfid, userid_list })
+                });
+                const data = await response.json();
+                document.getElementById('servicer-add-result').innerHTML = 
+                    \`<div class="result \${data.success ? '' : 'error'}"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('servicer-add-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+
+        async function getServicerList() {
+            const open_kfid = document.getElementById('list-kfid').value;
+            if (!open_kfid) {
+                alert('请输入客服账号ID');
+                return;
+            }
+
+            try {
+                const response = await fetch(\`/api/wechat/kf/servicer/list?open_kfid=\${open_kfid}\`);
+                const data = await response.json();
+                document.getElementById('servicer-list-result').innerHTML = 
+                    \`<div class="result \${data.success ? '' : 'error'}"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('servicer-list-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+
+        // 消息同步
+        async function syncMessages() {
+            const open_kfid = document.getElementById('sync-kfid').value;
+            const limit = parseInt(document.getElementById('sync-limit').value) || 100;
+            
+            const requestData = { limit };
+            if (open_kfid) requestData.open_kfid = open_kfid;
+
+            try {
+                const response = await fetch('/api/wechat/kf/sync-msg', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestData)
+                });
+                const data = await response.json();
+                document.getElementById('sync-result').innerHTML = 
+                    \`<div class="result \${data.success ? '' : 'error'}"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('sync-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+
+        async function sendKfMessage() {
+            const touser = document.getElementById('msg-touser').value;
+            const open_kfid = document.getElementById('msg-kfid').value;
+            const content = document.getElementById('msg-content').value;
+
+            if (!touser || !open_kfid || !content) {
+                alert('请填写完整信息');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/wechat/kf/send-message', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        touser, 
+                        open_kfid, 
+                        msgtype: 'text', 
+                        content 
+                    })
+                });
+                const data = await response.json();
+                document.getElementById('send-msg-result').innerHTML = 
+                    \`<div class="result \${data.success ? '' : 'error'}"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('send-msg-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+
+        // 会话状态
+        async function getSessionState() {
+            const external_userid = document.getElementById('session-userid').value;
+            const open_kfid = document.getElementById('session-kfid').value;
+
+            if (!external_userid || !open_kfid) {
+                alert('请填写用户ID和客服账号ID');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/wechat/kf/service-state/get', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ external_userid, open_kfid })
+                });
+                const data = await response.json();
+                document.getElementById('session-state-result').innerHTML = 
+                    \`<div class="result \${data.success ? '' : 'error'}"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('session-state-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+
+        async function transSessionState() {
+            const external_userid = document.getElementById('trans-userid').value;
+            const open_kfid = document.getElementById('trans-kfid').value;
+            const service_state = parseInt(document.getElementById('trans-state').value);
+            const servicer_userid = document.getElementById('trans-servicer').value;
+
+            if (!external_userid || !open_kfid) {
+                alert('请填写用户ID和客服账号ID');
+                return;
+            }
+
+            const requestData = { external_userid, open_kfid, service_state };
+            if (servicer_userid) {
+                requestData.servicer_userid = servicer_userid;
+            }
+
+            try {
+                const response = await fetch('/api/wechat/kf/service-state/trans', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestData)
+                });
+                const data = await response.json();
+                document.getElementById('trans-state-result').innerHTML = 
+                    \`<div class="result \${data.success ? '' : 'error'}"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('trans-state-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+
+        // 客户信息
+        async function getCustomerInfo() {
+            const external_userid = document.getElementById('customer-userid').value;
+            if (!external_userid) {
+                alert('请输入微信用户ID');
+                return;
+            }
+
+            try {
+                const response = await fetch(\`/api/wechat/kf/customer/info?external_userid=\${external_userid}\`);
+                const data = await response.json();
+                document.getElementById('customer-info-result').innerHTML = 
+                    \`<div class="result \${data.success ? '' : 'error'}"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('customer-info-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+
+        async function getKfLink() {
+            const open_kfid = document.getElementById('link-kfid').value;
+            const scene = document.getElementById('link-scene').value;
+            
+            if (!open_kfid) {
+                alert('请输入客服账号ID');
+                return;
+            }
+
+            try {
+                const url = \`/api/wechat/kf/account/link?open_kfid=\${open_kfid}\${scene ? '&scene=' + scene : ''}\`;
+                const response = await fetch(url);
+                const data = await response.json();
+                document.getElementById('link-result').innerHTML = 
+                    \`<div class="result \${data.success ? '' : 'error'}"><pre>\${JSON.stringify(data, null, 2)}</pre></div>\`;
+            } catch (error) {
+                document.getElementById('link-result').innerHTML = 
+                    \`<div class="result error">错误: \${error.message}</div>\`;
+            }
+        }
+    </script>
+</body>
+</html>
+  `;
+  
+  res.send(html);
 });
 
 module.exports = router; 
