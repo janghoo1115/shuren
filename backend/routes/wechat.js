@@ -389,11 +389,44 @@ async function handleKfMessage(token) {
     
     addProcessingLog('KF', '获取access_token成功', { expires_in: tokenData.expires_in });
     
+    // 先获取客服账号列表
+    const kfListResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/account/list?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({})
+    });
+    
+    const kfListResult = await kfListResponse.json();
+    
+    if (kfListResult.errcode !== 0) {
+      throw new Error('获取客服账号列表失败: ' + kfListResult.errmsg);
+    }
+    
+    addProcessingLog('KF', '获取客服账号列表成功', { 
+      account_count: kfListResult.account_list ? kfListResult.account_list.length : 0
+    });
+    
+    if (!kfListResult.account_list || kfListResult.account_list.length === 0) {
+      throw new Error('没有可用的客服账号');
+    }
+    
+    // 使用第一个客服账号
+    const kfAccount = kfListResult.account_list[0];
+    const open_kfid = kfAccount.open_kfid;
+    
+    addProcessingLog('KF', '使用客服账号', { 
+      open_kfid: open_kfid,
+      name: kfAccount.name 
+    });
+    
     // 同步客服消息
     const syncData = {
       token: token,
       limit: 1000,
-      voice_format: 0
+      voice_format: 0,
+      open_kfid: open_kfid
     };
     
     const syncResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=${tokenData.access_token}`, {
@@ -834,6 +867,44 @@ router.get('/debug/kf-logs', (req, res) => {
     timestamp: new Date().toISOString(),
     message: kfLogs.length > 0 ? `已记录 ${kfLogs.length} 条微信客服处理日志` : '暂无微信客服处理日志'
   });
+});
+
+// 调试接口：查看客服账号信息
+router.get('/debug/kf-accounts', async (req, res) => {
+  try {
+    // 获取access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.errcode !== 0) {
+      return res.status(400).json({ error: '获取access_token失败', details: tokenData });
+    }
+    
+    // 获取客服账号列表
+    const kfListResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/account/list?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({})
+    });
+    
+    const kfListResult = await kfListResponse.json();
+    
+    res.json({
+      success: kfListResult.errcode === 0,
+      kf_accounts: kfListResult.account_list || [],
+      account_count: kfListResult.account_list ? kfListResult.account_list.length : 0,
+      timestamp: new Date().toISOString(),
+      error: kfListResult.errcode !== 0 ? kfListResult.errmsg : null
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      error: '获取客服账号信息失败',
+      message: error.message
+    });
+  }
 });
 
 // 验证企微配置
