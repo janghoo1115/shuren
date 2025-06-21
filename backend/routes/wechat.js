@@ -148,42 +148,16 @@ async function handleWeChatMessage(message, timestamp, nonce) {
     const messageData = parseWeChatMessage(message);
     console.log('解析后的消息数据:', messageData);
     
-    // 如果是文本消息，构建被动回复
+    // 如果是文本消息，记录但暂不被动回复（被动回复在企业微信中比较复杂）
     if (messageData && messageData.MsgType === 'text') {
-      console.log('收到文本消息，准备被动回复...');
+      console.log('收到文本消息:', messageData.Content);
+      console.log('发送者:', messageData.FromUserName);
       
-      // 构建回复消息XML
-      const replyContent = '好的收到，我们的客服会尽快为您处理！';
-      const replyTime = Math.floor(Date.now() / 1000);
-      
-      const replyXml = `<xml>
-<ToUserName><![CDATA[${messageData.FromUserName}]]></ToUserName>
-<FromUserName><![CDATA[${messageData.ToUserName}]]></FromUserName>
-<CreateTime>${replyTime}</CreateTime>
-<MsgType><![CDATA[text]]></MsgType>
-<Content><![CDATA[${replyContent}]]></Content>
-</xml>`;
-      
-      console.log('构建的回复XML:', replyXml);
-      
-      // 加密回复消息
+      // 通知企业微信用户有新的客服消息
       try {
-        const encryptedReply = crypto.encrypt(replyXml);
-        const signature = crypto.generateSignature(timestamp, nonce, encryptedReply);
-        
-        const responseXml = `<xml>
-<Encrypt><![CDATA[${encryptedReply}]]></Encrypt>
-<MsgSignature><![CDATA[${signature}]]></MsgSignature>
-<TimeStamp>${timestamp}</TimeStamp>
-<Nonce><![CDATA[${nonce}]]></Nonce>
-</xml>`;
-        
-        console.log('加密后的回复XML已生成');
-        return responseXml;
-        
-      } catch (encryptError) {
-        console.error('加密回复消息失败:', encryptError);
-        return null;
+        await notifyCustomerServiceMessage(messageData);
+      } catch (error) {
+        console.error('通知客服失败:', error);
       }
     }
     
@@ -220,6 +194,49 @@ function parseWeChatMessage(xmlString) {
   } catch (error) {
     console.error('解析XML消息失败:', error);
     return null;
+  }
+}
+
+// 通知企业微信用户有新的客服消息
+async function notifyCustomerServiceMessage(messageData) {
+  try {
+    // 获取access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.errcode !== 0) {
+      throw new Error('获取access_token失败: ' + tokenData.errmsg);
+    }
+
+    // 发送通知消息给企业管理员（假设使用@all）
+    const notificationMessage = {
+      touser: "@all", // 发送给所有企业成员，你也可以指定特定用户
+      msgtype: "text",
+      agentid: WECHAT_CONFIG.agentId,
+      text: {
+        content: `📨 收到新的客服消息\n\n发送者: ${messageData.FromUserName}\n内容: ${messageData.Content}\n时间: ${new Date().toLocaleString()}\n\n请及时处理客户咨询！`
+      }
+    };
+
+    const sendResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(notificationMessage)
+    });
+
+    const sendResult = await sendResponse.json();
+    
+    if (sendResult.errcode === 0) {
+      console.log('客服消息通知发送成功:', sendResult);
+    } else {
+      console.error('客服消息通知发送失败:', sendResult);
+    }
+
+  } catch (error) {
+    console.error('通知客服消息失败:', error);
+    throw error;
   }
 }
 
@@ -527,6 +544,40 @@ router.get('/users', async (req, res) => {
   } catch (error) {
     console.error('获取用户列表失败:', error);
     res.status(500).json({ error: '获取用户列表失败', message: error.message });
+  }
+});
+
+// 客服回复接口（用于企业用户主动回复微信用户）
+router.post('/customer-service-reply', async (req, res) => {
+  try {
+    const { touser, content, msgtype = 'text' } = req.body;
+    
+    if (!touser || !content) {
+      return res.status(400).json({ 
+        error: '参数不完整',
+        required: 'touser (微信用户ID), content (回复内容)'
+      });
+    }
+
+    // 注意：这里只是一个演示接口
+    // 真正的微信客服回复需要特殊的客服API，目前企业微信没有直接的客服回复API
+    // 实际场景中可能需要通过微信公众号的客服API或其他方式
+    
+    console.log('收到客服回复请求:', { touser, content, msgtype });
+    
+    // 这里可以记录到数据库或队列中，等待后续处理
+    res.json({
+      success: true,
+      message: '客服回复已记录，但无法直接发送给微信用户',
+      note: '企业微信应用无法直接回复微信用户，需要通过其他渠道或等待微信官方支持',
+      touser,
+      content,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('客服回复失败:', error);
+    res.status(500).json({ error: '客服回复失败', message: error.message });
   }
 });
 
