@@ -209,8 +209,9 @@ async function handleWeChatMessage(message, timestamp, nonce) {
           fromUser: messageData.FromUserName
         });
         
-        console.log('这是一个客服系统事件，准备发送自动回复');
-        // 对于客服事件，我们记录下来并发送自动回复
+        console.log('收到微信客服事件通知，开始处理...');
+        
+        // 保存事件记录
         const eventRecord = {
           timestamp: new Date().toISOString(),
           fromUser: messageData.FromUserName || 'unknown',
@@ -221,7 +222,6 @@ async function handleWeChatMessage(message, timestamp, nonce) {
           createTime: messageData.CreateTime
         };
         
-        // 保存事件记录
         customerMessages.unshift(eventRecord);
         if (customerMessages.length > 10) {
           customerMessages = customerMessages.slice(0, 10);
@@ -233,40 +233,18 @@ async function handleWeChatMessage(message, timestamp, nonce) {
         console.log('Token:', eventRecord.token);
         console.log('=====================');
         
-        // 为客服事件生成自动回复
-        try {
-          addProcessingLog('REPLY', '开始生成客服事件自动回复', {
-            fromUser: messageData.ToUserName,
-            toUser: 'wechat_user',
-            timestamp,
-            nonce
-          });
-          
-          const replyXml = await generatePassiveReply(
-            messageData.ToUserName,    // 企业微信
-            'wechat_user',            // 微信用户（用占位符，因为FromUserName可能为空）
-            '您好！我们已收到您的消息，客服人员会尽快为您处理，请稍候！',
-            timestamp,
-            nonce
-          );
-          
-          addProcessingLog('REPLY', '客服事件自动回复生成成功', {
-            replyLength: replyXml ? replyXml.length : 0
-          });
-          
-          console.log('客服事件自动回复生成成功，返回结果');
-          return replyXml;
-        } catch (error) {
-          addProcessingLog('ERROR', '生成客服事件自动回复失败', {
-            errorType: error.constructor.name,
-            errorMessage: error.message,
-            errorStack: error.stack
-          });
-          console.error('生成客服事件自动回复失败:', error);
-          
-          // 即使生成回复失败，也要返回一个简单的success，避免500错误
-          return null;
-        }
+        // 异步处理客服消息（不阻塞响应）
+        setTimeout(async () => {
+          try {
+            await handleKfMessage(messageData.Token);
+          } catch (error) {
+            console.error('处理客服消息失败:', error);
+          }
+        }, 100);
+        
+        // 立即返回success，不做被动回复
+        // 根据官方文档，kf_msg_or_event 事件不支持被动回复
+        return null;
       }
     } else if (messageData) {
       console.log('收到其他类型消息，类型:', messageData.MsgType);
@@ -393,6 +371,134 @@ async function notifyCustomerServiceMessage(messageData) {
   } catch (error) {
     console.error('通知客服消息失败:', error);
     throw error;
+  }
+}
+
+// 处理微信客服消息
+async function handleKfMessage(token) {
+  try {
+    addProcessingLog('KF', '开始处理微信客服消息', { token: token.substring(0, 20) + '...' });
+    
+    // 获取access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.errcode !== 0) {
+      throw new Error('获取access_token失败: ' + tokenData.errmsg);
+    }
+    
+    addProcessingLog('KF', '获取access_token成功', { expires_in: tokenData.expires_in });
+    
+    // 同步客服消息
+    const syncData = {
+      token: token,
+      limit: 1000,
+      voice_format: 0
+    };
+    
+    const syncResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(syncData)
+    });
+    
+    const syncResult = await syncResponse.json();
+    
+    if (syncResult.errcode !== 0) {
+      throw new Error('同步客服消息失败: ' + syncResult.errmsg);
+    }
+    
+    addProcessingLog('KF', '同步客服消息成功', { 
+      msg_count: syncResult.msg_list ? syncResult.msg_list.length : 0,
+      has_more: syncResult.has_more
+    });
+    
+    console.log('=== 同步到的客服消息 ===');
+    console.log(JSON.stringify(syncResult, null, 2));
+    console.log('=====================');
+    
+    // 处理每条消息
+    if (syncResult.msg_list && syncResult.msg_list.length > 0) {
+      for (const msg of syncResult.msg_list) {
+        if (msg.origin === 3) { // 微信用户发送的消息
+          await processKfUserMessage(msg, tokenData.access_token);
+        }
+      }
+    }
+    
+  } catch (error) {
+    addProcessingLog('ERROR', '处理微信客服消息失败', {
+      errorType: error.constructor.name,
+      errorMessage: error.message
+    });
+    console.error('处理微信客服消息失败:', error);
+  }
+}
+
+// 处理单条微信用户客服消息
+async function processKfUserMessage(msg, accessToken) {
+  try {
+    addProcessingLog('KF', '处理用户消息', {
+      msgid: msg.msgid,
+      msgtype: msg.msgtype,
+      open_kfid: msg.open_kfid,
+      external_userid: msg.external_userid
+    });
+    
+    console.log('=== 处理用户消息 ===');
+    console.log('消息ID:', msg.msgid);
+    console.log('消息类型:', msg.msgtype);
+    console.log('客服ID:', msg.open_kfid);
+    console.log('用户ID:', msg.external_userid);
+    
+    if (msg.msgtype === 'text') {
+      console.log('消息内容:', msg.text.content);
+      
+      // 发送自动回复
+      const replyData = {
+        touser: msg.external_userid,
+        open_kfid: msg.open_kfid,
+        msgtype: 'text',
+        text: {
+          content: '您好！我们已收到您的消息，客服人员会尽快为您处理，请稍候！'
+        }
+      };
+      
+      const replyResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${accessToken}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(replyData)
+      });
+      
+      const replyResult = await replyResponse.json();
+      
+      if (replyResult.errcode === 0) {
+        addProcessingLog('KF', '自动回复发送成功', {
+          msgid: replyResult.msgid,
+          external_userid: msg.external_userid
+        });
+        console.log('自动回复发送成功！消息ID:', replyResult.msgid);
+      } else {
+        addProcessingLog('ERROR', '自动回复发送失败', {
+          errcode: replyResult.errcode,
+          errmsg: replyResult.errmsg
+        });
+        console.error('自动回复发送失败:', replyResult);
+      }
+    }
+    
+    console.log('=====================');
+    
+  } catch (error) {
+    addProcessingLog('ERROR', '处理用户消息失败', {
+      errorType: error.constructor.name,
+      errorMessage: error.message
+    });
+    console.error('处理用户消息失败:', error);
   }
 }
 
@@ -715,6 +821,18 @@ router.get('/debug/processing-logs', (req, res) => {
     status: '日志记录服务正常',
     timestamp: new Date().toISOString(),
     message: processingLogs.length > 0 ? `已记录 ${processingLogs.length} 条处理日志` : '暂无处理日志'
+  });
+});
+
+// 调试接口：查看微信客服处理日志
+router.get('/debug/kf-logs', (req, res) => {
+  const kfLogs = processingLogs.filter(log => log.type === 'KF' || (log.type === 'ERROR' && log.message.includes('客服')));
+  res.json({
+    kf_logs: kfLogs,
+    log_count: kfLogs.length,
+    status: '微信客服日志服务正常',
+    timestamp: new Date().toISOString(),
+    message: kfLogs.length > 0 ? `已记录 ${kfLogs.length} 条微信客服处理日志` : '暂无微信客服处理日志'
   });
 });
 
