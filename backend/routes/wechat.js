@@ -194,11 +194,47 @@ async function handleWeChatMessage(message, timestamp, nonce) {
       return null;
     }
     
-    // 如果是文本消息，记录消息
+    // 检查消息类型并处理
     if (messageData && messageData.MsgType === 'text') {
       console.log('检测到文本消息类型');
+    } else if (messageData && messageData.MsgType === 'event') {
+      console.log('检测到事件类型，事件名称:', messageData.Event);
+      
+      // 处理客服相关事件
+      if (messageData.Event === 'kf_msg_or_event') {
+        addProcessingLog('EVENT', '收到客服事件', {
+          event: messageData.Event,
+          token: messageData.Token,
+          toUser: messageData.ToUserName,
+          fromUser: messageData.FromUserName
+        });
+        
+        console.log('这是一个客服系统事件，可能需要通过客服API获取具体消息内容');
+        // 对于客服事件，我们记录下来但需要通过其他API获取具体消息
+        const eventRecord = {
+          timestamp: new Date().toISOString(),
+          fromUser: messageData.FromUserName || 'unknown',
+          toUser: messageData.ToUserName,
+          eventType: messageData.Event,
+          token: messageData.Token,
+          msgType: 'event',
+          createTime: messageData.CreateTime
+        };
+        
+        // 保存事件记录
+        customerMessages.unshift(eventRecord);
+        if (customerMessages.length > 10) {
+          customerMessages = customerMessages.slice(0, 10);
+        }
+        
+        console.log('=== 客服事件记录 ===');
+        console.log('时间:', eventRecord.timestamp);
+        console.log('事件类型:', eventRecord.eventType);
+        console.log('Token:', eventRecord.token);
+        console.log('=====================');
+      }
     } else if (messageData) {
-      console.log('收到非文本消息，类型:', messageData.MsgType);
+      console.log('收到其他类型消息，类型:', messageData.MsgType);
     }
     
     if (messageData && messageData.MsgType === 'text') {
@@ -259,7 +295,12 @@ function parseWeChatMessage(xmlString) {
       CreateTime: /<CreateTime>(.*?)<\/CreateTime>/,
       MsgType: /<MsgType><!\[CDATA\[(.*?)\]\]><\/MsgType>/,
       Content: /<Content><!\[CDATA\[(.*?)\]\]><\/Content>/,
-      MsgId: /<MsgId>(.*?)<\/MsgId>/
+      MsgId: /<MsgId>(.*?)<\/MsgId>/,
+      Event: /<Event><!\[CDATA\[(.*?)\]\]><\/Event>/,
+      Token: /<Token><!\[CDATA\[(.*?)\]\]><\/Token>/,
+      // 客服消息相关字段
+      KfAccount: /<KfAccount><!\[CDATA\[(.*?)\]\]><\/KfAccount>/,
+      OpenKfId: /<OpenKfId><!\[CDATA\[(.*?)\]\]><\/OpenKfId>/
     };
     
     const result = {};
