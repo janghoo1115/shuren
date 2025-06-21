@@ -145,13 +145,27 @@ router.all('/callback', async (req, res) => {
 // 处理微信消息的业务逻辑
 async function handleWeChatMessage(message, timestamp, nonce) {
   try {
-    console.log('处理微信消息:', message);
+    console.log('开始处理微信消息...');
+    console.log('原始消息长度:', message ? message.length : 0);
+    console.log('消息前100字符:', message ? message.substring(0, 100) : 'null');
     
     // 解析XML消息
     const messageData = parseWeChatMessage(message);
-    console.log('解析后的消息数据:', messageData);
+    console.log('解析后的消息数据:', JSON.stringify(messageData, null, 2));
     
-    // 如果是文本消息，记录但暂不被动回复（被动回复在企业微信中比较复杂）
+    // 检查是否成功解析
+    if (!messageData) {
+      console.log('消息解析失败，原始XML:', message);
+      return null;
+    }
+    
+    // 如果是文本消息，记录消息
+    if (messageData && messageData.MsgType === 'text') {
+      console.log('检测到文本消息类型');
+    } else if (messageData) {
+      console.log('收到非文本消息，类型:', messageData.MsgType);
+    }
+    
     if (messageData && messageData.MsgType === 'text') {
       console.log('收到文本消息:', messageData.Content);
       console.log('发送者:', messageData.FromUserName);
