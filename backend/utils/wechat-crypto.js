@@ -166,7 +166,7 @@ class WeChatCrypto {
       cipher.setAutoPadding(false);
       
       const encrypted = Buffer.concat([cipher.update(paddedContent), cipher.final()]);
-      return Buffer.concat([iv, encrypted]).toString('base64');
+      return encrypted.toString('base64'); // 不需要包含IV
     } catch (error) {
       console.error('加密失败:', error);
       throw error;
