@@ -516,7 +516,7 @@ async function processKfUserMessage(msg, accessToken) {
       // 检查是否需要发送自动回复（防止频繁回复）
       const now = Date.now();
       const lastReplyTime = userLastReplyTime.get(msg.external_userid);
-      const replyInterval = 10000; // 10秒内不重复回复
+      const replyInterval = 3000; // 3秒内不重复回复
       
       if (!lastReplyTime || (now - lastReplyTime) > replyInterval) {
         // 发送自动回复（包含用户发送的消息内容）
@@ -909,6 +909,19 @@ router.get('/debug/kf-logs', (req, res) => {
     status: '微信客服日志服务正常',
     timestamp: new Date().toISOString(),
     message: kfLogs.length > 0 ? `已记录 ${kfLogs.length} 条微信客服处理日志` : '暂无微信客服处理日志'
+  });
+});
+
+// 调试接口：清除用户回复时间限制
+router.get('/debug/clear-reply-limits', (req, res) => {
+  const beforeCount = userLastReplyTime.size;
+  userLastReplyTime.clear();
+  
+  res.json({
+    success: true,
+    message: '已清除所有用户回复时间限制',
+    cleared_users: beforeCount,
+    timestamp: new Date().toISOString()
   });
 });
 
