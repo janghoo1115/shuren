@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const fetch = require('node-fetch');
 
 // 添加调试日志
 console.log('开始启动数刃AI后端服务...');
@@ -41,7 +42,19 @@ app.use('/api/user', userRoutes);
 
 // 健康检查
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  const userAgent = req.get('User-Agent') || '';
+  const isHeartbeat = userAgent.includes('heartbeat-keepalive');
+  
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    heartbeat: isHeartbeat,
+    uptime: process.uptime()
+  });
+  
+  if (isHeartbeat) {
+    console.log(`心跳检查 - 服务运行时间: ${Math.floor(process.uptime())}秒`);
+  }
 });
 
 // IP检查
@@ -91,7 +104,43 @@ app.use((req, res) => {
   res.status(404).json({ error: '接口不存在' });
 });
 
+// 心跳保活机制
+function startHeartbeat() {
+  const HEARTBEAT_INTERVAL = 12 * 60 * 1000; // 12分钟
+  const SERVICE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+  
+  console.log('启动心跳保活机制...');
+  console.log(`心跳间隔: ${HEARTBEAT_INTERVAL / 1000}秒`);
+  console.log(`服务URL: ${SERVICE_URL}`);
+  
+  setInterval(async () => {
+    try {
+      const response = await fetch(`${SERVICE_URL}/health`, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'heartbeat-keepalive/1.0'
+        },
+        timeout: 10000
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`心跳成功 - 运行时间: ${Math.floor(data.uptime)}秒`);
+      } else {
+        console.warn(`心跳响应异常: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('心跳失败:', error.message);
+    }
+  }, HEARTBEAT_INTERVAL);
+}
+
 app.listen(PORT, () => {
   console.log(`数刃AI后端服务启动成功，端口: ${PORT}`);
   console.log(`环境: ${process.env.NODE_ENV || 'development'}`);
+  
+  // 延迟3秒启动心跳，确保服务完全启动
+  setTimeout(() => {
+    startHeartbeat();
+  }, 3000);
 }); 
