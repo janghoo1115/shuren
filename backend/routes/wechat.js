@@ -241,7 +241,8 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
     const currentDate = new Date().toLocaleDateString('zh-CN');
     const currentTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     
-    const titleContent = `${currentDate} ${currentTime} - ${aiSummary}`;
+    // 临时使用简单的文本格式，避免复杂的标题块导致的参数错误
+    const titleContent = `\n### ${currentDate} ${currentTime} - ${aiSummary}\n\n${userContent}\n\n`;
     
     const updateResponse = await fetch(
       `https://open.feishu.cn/open-apis/docx/v1/documents/${mainDocumentId}/blocks/${mainDocumentId}/children`,
@@ -254,28 +255,12 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
         body: JSON.stringify({
           children: [
             {
-              block_type: 3, // 标题块
-              heading: {
-                elements: [
-                  {
-                    text_run: {
-                      content: titleContent,
-                      text_element_style: {}
-                    }
-                  }
-                ],
-                style: {
-                  level: 3 // H3标题
-                }
-              }
-            },
-            {
-              block_type: 2, // 文本块
+              block_type: 2, // 使用文本块而不是标题块
               text: {
                 elements: [
                   {
                     text_run: {
-                      content: userContent,
+                      content: titleContent,
                       text_element_style: {}
                     }
                   }
@@ -291,6 +276,7 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
 
     const updateData = await updateResponse.json();
     console.log('更新主文档响应状态:', updateData.code);
+    console.log('更新主文档响应详情:', JSON.stringify(updateData, null, 2));
 
     return {
       success: updateData.code === 0,
@@ -1542,6 +1528,59 @@ router.get('/debug/auth-url/:userid?', (req, res) => {
     auth_url: authUrl,
     note: '这是为指定用户生成的飞书认证链接'
   });
+});
+
+// 测试文档访问
+router.post('/debug/test-doc-access', async (req, res) => {
+  try {
+    const { external_userid } = req.body;
+    
+    if (!external_userid) {
+      return res.status(400).json({ error: '缺少external_userid参数' });
+    }
+    
+    const feishuData = userFeishuData.get(external_userid);
+    
+    if (!feishuData) {
+      return res.json({
+        success: false,
+        error: '用户飞书数据不存在',
+        external_userid
+      });
+    }
+    
+    // 检查文档是否存在
+    const docCheck = await checkFeishuDocumentExists(feishuData.access_token, feishuData.main_document_id);
+    
+    // 尝试更新文档
+    let updateResult = null;
+    if (docCheck.exists && docCheck.accessible) {
+      updateResult = await updateMainFeishuDocument(
+        feishuData.access_token,
+        feishuData.main_document_id,
+        '测试内容：这是一条调试消息',
+        '调试测试'
+      );
+    }
+    
+    res.json({
+      success: true,
+      external_userid,
+      feishu_data: {
+        user_name: feishuData.user_name,
+        main_document_id: feishuData.main_document_id,
+        has_access_token: !!feishuData.access_token
+      },
+      document_check: docCheck,
+      update_test: updateResult
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      error: '测试文档访问失败',
+      message: error.message
+    });
+  }
 });
 
 // 发送消息
