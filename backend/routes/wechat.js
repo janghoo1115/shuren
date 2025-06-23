@@ -144,7 +144,7 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
     const currentDate = new Date().toLocaleDateString('zh-CN');
     const currentTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     
-    const newContent = `\n\n### ${currentDate} ${currentTime} - ${aiSummary}\n\n${userContent}`;
+    const titleContent = `${currentDate} ${currentTime} - ${aiSummary}`;
     
     const updateResponse = await fetch(
       `https://open.feishu.cn/open-apis/docx/v1/documents/${mainDocumentId}/blocks/${mainDocumentId}/children`,
@@ -157,12 +157,28 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
         body: JSON.stringify({
           children: [
             {
+              block_type: 3, // 标题块
+              heading: {
+                elements: [
+                  {
+                    text_run: {
+                      content: titleContent,
+                      text_element_style: {}
+                    }
+                  }
+                ],
+                style: {
+                  level: 3 // H3标题
+                }
+              }
+            },
+            {
               block_type: 2, // 文本块
               text: {
                 elements: [
                   {
                     text_run: {
-                      content: newContent,
+                      content: userContent,
                       text_element_style: {}
                     }
                   }
