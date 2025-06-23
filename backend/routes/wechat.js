@@ -30,6 +30,33 @@ let processingLogs = [];
 // 存储用户最后回复时间（防止重复回复）
 let userLastReplyTime = new Map();
 
+// ===== 新增：用户状态管理 =====
+const USER_STATES = {
+  UNAUTH: 'unauth',           // 未认证
+  AUTHENTICATED: 'authenticated', // 已认证，待初始化
+  INITIALIZED: 'initialized'      // 已初始化，可以正常使用
+};
+
+// 存储用户状态
+let userStates = new Map(); // external_userid -> state
+
+// 存储用户飞书信息
+let userFeishuData = new Map(); // external_userid -> { access_token, main_document_id, user_name }
+
+// ===== 飞书配置 =====
+const FEISHU_CONFIG = {
+  app_id: process.env.FEISHU_APP_ID || "cli_a8c3c35f5230d00e",
+  app_secret: process.env.FEISHU_APP_SECRET || "bAbJhKTOnzLyBxHwbK2hkgkRPFsPTRgw",
+  redirect_uri: process.env.FEISHU_REDIRECT_URI || "https://backend.shurenai.xyz/api/wechat/feishu-auth"
+};
+
+// ===== 豆包AI配置 =====
+const DOUBAO_CONFIG = {
+  api_key: process.env.DOUBAO_API_KEY || '',
+  api_url: process.env.DOUBAO_API_URL || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+  model_id: process.env.DOUBAO_MODEL_ID || 'ep-20241211142857-8q2fh'
+};
+
 // 添加处理日志
 function addProcessingLog(type, message, data = null) {
   const log = {
@@ -47,19 +74,539 @@ function addProcessingLog(type, message, data = null) {
   console.log(`[${type}] ${message}`, data ? JSON.stringify(data).substring(0, 100) : '');
 }
 
-// 清理过期的用户回复时间记录（每10分钟清理一次）
-setInterval(() => {
-  const now = Date.now();
-  const expireTime = 30 * 60 * 1000; // 30分钟过期
-  
-  for (const [userId, lastTime] of userLastReplyTime.entries()) {
-    if (now - lastTime > expireTime) {
-      userLastReplyTime.delete(userId);
+// ===== 新增：豆包AI调用函数 =====
+async function callDoubaoAPI(userContent) {
+  try {
+    if (!DOUBAO_CONFIG.api_key) {
+      console.warn('豆包API密钥未配置，使用模拟总结');
+      return {
+        success: true,
+        content: `📝 内容概括：${userContent.length > 20 ? userContent.substring(0, 20) + '...' : userContent}`
+      };
     }
+
+    const response = await fetch(DOUBAO_CONFIG.api_url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${DOUBAO_CONFIG.api_key}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: DOUBAO_CONFIG.model_id,
+        messages: [
+          {
+            role: 'system',
+            content: '你是一个专业的内容总结助手。请对用户发送的内容进行简洁的20字以内概括，提取核心信息。只返回概括内容，不要其他文字。'
+          },
+          {
+            role: 'user',
+            content: `请用20字以内概括以下内容：\n\n${userContent}`
+          }
+        ],
+        max_tokens: 100,
+        temperature: 0.3
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`豆包API请求失败: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    if (data.choices && data.choices.length > 0) {
+      let aiContent = data.choices[0].message.content.trim();
+      // 确保概括在20字以内
+      if (aiContent.length > 20) {
+        aiContent = aiContent.substring(0, 20) + '...';
+      }
+      return {
+        success: true,
+        content: aiContent
+      };
+    } else {
+      throw new Error('豆包API返回数据格式异常');
+    }
+
+  } catch (error) {
+    console.error('调用豆包API失败:', error);
+    // 如果API调用失败，返回简单概括
+    return {
+      success: true,
+      content: userContent.length > 20 ? userContent.substring(0, 20) + '...' : userContent
+    };
   }
+}
+
+// ===== 新增：飞书文档操作函数 =====
+async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent, aiSummary) {
+  try {
+    const currentDate = new Date().toLocaleDateString('zh-CN');
+    const currentTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    
+    const newContent = `\n\n### ${currentDate} ${currentTime} - ${aiSummary}\n\n${userContent}`;
+    
+    const updateResponse = await fetch(
+      `https://open.feishu.cn/open-apis/docx/v1/documents/${mainDocumentId}/blocks/${mainDocumentId}/children`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          children: [
+            {
+              block_type: 2, // 文本块
+              text: {
+                elements: [
+                  {
+                    text_run: {
+                      content: newContent,
+                      text_element_style: {}
+                    }
+                  }
+                ],
+                style: {}
+              }
+            }
+          ],
+          index: -1 // 添加到末尾
+        })
+      }
+    );
+
+    const updateData = await updateResponse.json();
+    console.log('更新主文档响应状态:', updateData.code);
+
+    return {
+      success: updateData.code === 0,
+      error: updateData.code !== 0 ? updateData.msg : null
+    };
+
+  } catch (error) {
+    console.error('更新飞书文档异常:', error);
+    return { success: false, error: `更新文档时发生异常: ${error.message}` };
+  }
+}
+
+async function createMainFeishuDocument(accessToken, userName) {
+  try {
+    const documentTitle = `微信随心记 - ${userName}`;
+    
+    // 1. 创建文档
+    const createResponse = await fetch('https://open.feishu.cn/open-apis/docx/v1/documents', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        title: documentTitle,
+        folder_token: ""
+      })
+    });
+
+    const createData = await createResponse.json();
+    console.log('创建主文档响应状态:', createData.code);
+
+    if (createData.code !== 0) {
+      return { success: false, error: `创建文档失败: ${createData.msg}` };
+    }
+
+    const documentId = createData.data.document.document_id;
+
+    // 2. 添加初始内容
+    const initialContent = `# 微信随心记 - ${userName}\n\n欢迎使用微信随心记！你的所有消息都会记录在这里。\n\n创建时间：${new Date().toLocaleString('zh-CN')}\n\n---\n`;
+    
+    const contentResponse = await fetch(
+      `https://open.feishu.cn/open-apis/docx/v1/documents/${documentId}/blocks/${documentId}/children`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          children: [
+            {
+              block_type: 2, // 文本块
+              text: {
+                elements: [
+                  {
+                    text_run: {
+                      content: initialContent,
+                      text_element_style: {}
+                    }
+                  }
+                ],
+                style: {}
+              }
+            }
+          ],
+          index: 0
+        })
+      }
+    );
+
+    const contentData = await contentResponse.json();
+    console.log('添加初始内容响应状态:', contentData.code);
+
+    if (contentData.code === 0) {
+      return {
+        success: true,
+        documentId: documentId,
+        title: documentTitle,
+        url: `https://bytedance.feishu.cn/docx/${documentId}`
+      };
+    } else {
+      return { success: false, error: `添加文档内容失败: ${contentData.msg}` };
+    }
+
+  } catch (error) {
+    console.error('创建飞书主文档异常:', error);
+    return { success: false, error: `创建文档时发生异常: ${error.message}` };
+  }
+}
+
+// ===== 新增：生成飞书认证链接 =====
+function generateFeishuAuthUrl(external_userid = null) {
+  const state = external_userid ? `wechat_integration&external_userid=${external_userid}` : 'wechat_integration';
   
-  console.log(`清理过期用户回复记录，当前记录数: ${userLastReplyTime.size}`);
-}, 10 * 60 * 1000);
+  const params = new URLSearchParams({
+    app_id: FEISHU_CONFIG.app_id,
+    redirect_uri: FEISHU_CONFIG.redirect_uri,
+    scope: 'drive:drive',
+    state: state
+  });
+  
+  return `https://open.feishu.cn/open-apis/authen/v1/authorize?${params.toString()}`;
+}
+
+// ===== 新增：用户状态更新接口 =====
+router.post('/update-user-status', async (req, res) => {
+  try {
+    const { external_userid, access_token, main_document_id, user_name } = req.body;
+    
+    if (!external_userid || !access_token || !main_document_id) {
+      return res.status(400).json({
+        error: '缺少必需参数',
+        required: ['external_userid', 'access_token', 'main_document_id']
+      });
+    }
+    
+    // 更新用户状态为已初始化
+    userStates.set(external_userid, USER_STATES.INITIALIZED);
+    userFeishuData.set(external_userid, {
+      access_token,
+      main_document_id,
+      user_name: user_name || '用户'
+    });
+    
+    addProcessingLog('USER_STATUS', '用户状态更新为已初始化', {
+      external_userid,
+      user_name,
+      main_document_id
+    });
+    
+    // 异步发送确认消息给用户
+    setTimeout(async () => {
+      try {
+        await sendConfirmationMessage(external_userid);
+      } catch (error) {
+        console.error('发送确认消息失败:', error);
+      }
+    }, 1000);
+    
+    res.json({
+      success: true,
+      message: '用户状态更新成功',
+      status: USER_STATES.INITIALIZED
+    });
+    
+  } catch (error) {
+    console.error('更新用户状态失败:', error);
+    res.status(500).json({
+      error: '更新用户状态失败',
+      message: error.message
+    });
+  }
+});
+
+// ===== 新增：发送确认消息函数 =====
+async function sendConfirmationMessage(external_userid) {
+  try {
+    // 获取企业微信access_token
+    const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.errcode !== 0) {
+      throw new Error('获取access_token失败: ' + tokenData.errmsg);
+    }
+    
+    // 获取客服账号列表
+    const kfListResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/account/list?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({})
+    });
+    
+    const kfListResult = await kfListResponse.json();
+    
+    if (kfListResult.errcode !== 0 || !kfListResult.account_list || kfListResult.account_list.length === 0) {
+      throw new Error('获取客服账号失败');
+    }
+    
+    // 使用第一个客服账号发送确认消息
+    const open_kfid = kfListResult.account_list[0].open_kfid;
+    
+    const confirmMessage = '认证成功了哈！现在可以把想记的随时发给我罗！';
+    
+    const replyData = {
+      touser: external_userid,
+      open_kfid: open_kfid,
+      msgtype: 'text',
+      text: {
+        content: confirmMessage
+      }
+    };
+    
+    const replyResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${tokenData.access_token}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(replyData)
+    });
+    
+    const replyResult = await replyResponse.json();
+    
+    if (replyResult.errcode === 0) {
+      addProcessingLog('CONFIRM', '确认消息发送成功', {
+        external_userid,
+        msgid: replyResult.msgid
+      });
+      console.log('确认消息发送成功！');
+    } else {
+      addProcessingLog('ERROR', '确认消息发送失败', {
+        external_userid,
+        errcode: replyResult.errcode,
+        errmsg: replyResult.errmsg
+      });
+      console.error('确认消息发送失败:', replyResult);
+    }
+    
+  } catch (error) {
+    addProcessingLog('ERROR', '发送确认消息异常', {
+      external_userid,
+      error: error.message
+    });
+    console.error('发送确认消息异常:', error);
+  }
+}
+
+// ===== 新增：飞书OAuth认证处理接口 =====
+router.all('/feishu-auth', async (req, res) => {
+  try {
+    const { code, error, state } = req.query;
+    
+    console.log('飞书OAuth回调:', { code: code ? code.substring(0, 10) + '...' : null, error, state });
+    
+    // 处理错误情况
+    if (error) {
+      return res.status(400).json({ error: '授权失败', details: error });
+    }
+    
+    if (!code) {
+      return res.status(400).json({ error: '缺少授权码' });
+    }
+    
+    // 从state中提取external_userid
+    let external_userid = null;
+    if (state && state.includes('external_userid=')) {
+      const match = state.match(/external_userid=([^&]+)/);
+      if (match) {
+        external_userid = match[1];
+      }
+    }
+    
+    // 获取访问令牌
+    const tokenResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/access_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'authorization_code',
+        code: code,
+        app_id: FEISHU_CONFIG.app_id,
+        app_secret: FEISHU_CONFIG.app_secret
+      })
+    });
+    
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.code !== 0) {
+      return res.status(400).json({
+        error: '获取访问令牌失败',
+        details: tokenData.msg
+      });
+    }
+    
+    const accessToken = tokenData.data.access_token;
+    
+    // 获取用户信息
+    const userInfo = await getFeishuUserInfo(accessToken);
+    
+    // 创建主文档
+    const createResult = await createMainFeishuDocument(accessToken, userInfo.name || '用户');
+    
+    if (!createResult.success) {
+      return res.status(500).json({
+        error: '创建文档失败',
+        details: createResult.error
+      });
+    }
+    
+    // 如果有external_userid，更新用户状态
+    if (external_userid) {
+      userStates.set(external_userid, USER_STATES.INITIALIZED);
+      userFeishuData.set(external_userid, {
+        access_token: accessToken,
+        main_document_id: createResult.documentId,
+        user_name: userInfo.name || '用户'
+      });
+      
+      addProcessingLog('FEISHU_AUTH', '飞书认证完成并更新用户状态', {
+        external_userid,
+        user_name: userInfo.name,
+        main_document_id: createResult.documentId
+      });
+      
+      // 异步发送确认消息
+      setTimeout(async () => {
+        try {
+          await sendConfirmationMessage(external_userid);
+        } catch (error) {
+          console.error('发送确认消息失败:', error);
+        }
+      }, 1000);
+    }
+    
+    // 返回成功页面HTML
+    const successHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>微信随心记 - 设置成功</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+                max-width: 600px;
+                margin: 50px auto;
+                padding: 20px;
+                background-color: #f5f5f5;
+                line-height: 1.6;
+            }
+            .container {
+                background: white;
+                padding: 40px;
+                border-radius: 12px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+                text-align: center;
+            }
+            .success-icon { font-size: 64px; margin-bottom: 20px; }
+            h1 { color: #2e7d32; margin-bottom: 20px; }
+            .user-info {
+                background: #e8f5e8;
+                padding: 20px;
+                border-radius: 8px;
+                margin: 20px 0;
+            }
+            .instructions {
+                background: #fff3cd;
+                border: 1px solid #ffeaa7;
+                color: #856404;
+                padding: 20px;
+                border-radius: 8px;
+                margin: 20px 0;
+                text-align: left;
+            }
+            .btn {
+                display: inline-block;
+                background-color: #00B96B;
+                color: white;
+                padding: 12px 24px;
+                text-decoration: none;
+                border-radius: 6px;
+                margin: 10px;
+                font-weight: 500;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="success-icon">🎉</div>
+            <h1>微信随心记设置成功！</h1>
+            
+            <div class="user-info">
+                <strong>👤 用户信息</strong><br>
+                姓名: ${userInfo.name || '用户'}<br>
+                设置完成时间: ${new Date().toLocaleString('zh-CN')}
+            </div>
+            
+            <div class="instructions">
+                <strong>📱 使用说明：</strong><br>
+                1. 现在您可以在微信中向客服发送任何内容<br>
+                2. 客服会自动将您的内容通过AI整理后记录到飞书文档<br>
+                3. 所有内容都会保存在您的"微信随心记"文档中<br>
+                4. 您可以随时在飞书中查看和编辑这些记录
+            </div>
+            
+            <p>您的微信随心记已经设置完成！现在可以回到微信开始使用了。</p>
+            
+            <a href="${createResult.url}" class="btn" target="_blank">📖 查看微信随心记</a>
+        </div>
+    </body>
+    </html>
+    `;
+    
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(successHtml);
+    
+  } catch (error) {
+    console.error('飞书OAuth处理失败:', error);
+    res.status(500).json({
+      error: '服务器错误',
+      message: error.message
+    });
+  }
+});
+
+// ===== 新增：获取飞书用户信息 =====
+async function getFeishuUserInfo(accessToken) {
+  try {
+    const response = await fetch('https://open.feishu.cn/open-apis/authen/v1/user_info', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const data = await response.json();
+    if (data.code === 0) {
+      return data.data;
+    } else {
+      console.error('获取用户信息失败:', data);
+      return { name: '用户', open_id: 'unknown' };
+    }
+  } catch (error) {
+    console.error('获取用户信息异常:', error);
+    return { name: '用户', open_id: 'unknown' };
+  }
+}
 
 // 微信回调处理
 router.all('/callback', async (req, res) => {
@@ -516,7 +1063,7 @@ async function handleKfMessage(token) {
   }
 }
 
-// 处理单条微信用户客服消息
+// 处理单条微信用户客服消息 - 全新工作流程
 async function processKfUserMessage(msg, accessToken) {
   try {
     addProcessingLog('KF', '处理用户消息', {
@@ -532,67 +1079,174 @@ async function processKfUserMessage(msg, accessToken) {
     console.log('客服ID:', msg.open_kfid);
     console.log('用户ID:', msg.external_userid);
     
-    if (msg.msgtype === 'text') {
-      console.log('消息内容:', msg.text.content);
+    if (msg.msgtype !== 'text') {
+      console.log('非文本消息，跳过处理');
+      return;
+    }
+
+    const userContent = msg.text.content;
+    const external_userid = msg.external_userid;
+    
+    console.log('消息内容:', userContent);
+    
+    // 检查用户状态
+    const currentState = userStates.get(external_userid) || USER_STATES.UNAUTH;
+    addProcessingLog('KF', '用户当前状态', {
+      external_userid,
+      state: currentState,
+      content: userContent
+    });
+    
+    // 防止频繁回复检查
+    const now = Date.now();
+    const lastReplyTime = userLastReplyTime.get(external_userid);
+    const replyInterval = 3000; // 3秒内不重复回复
+    
+    if (lastReplyTime && (now - lastReplyTime) < replyInterval) {
+      addProcessingLog('KF', '跳过处理（频率限制）', {
+        external_userid,
+        last_reply_ago: Math.round((now - lastReplyTime) / 1000) + '秒前'
+      });
+      return;
+    }
+    
+    let replyContent = '';
+    let shouldSendReply = true;
+    
+    // 根据用户状态进行不同处理
+    switch (currentState) {
+      case USER_STATES.UNAUTH:
+        // 未认证用户：发送飞书认证链接
+        const authUrl = generateFeishuAuthUrl(external_userid);
+        replyContent = `Hi，欢迎使用随心记。如果你是第一次使用，记得点击以下链接进行飞书认证哦！认证结束我会在你的飞书创建名为"微信随心记"的文档，以后的所有内容都会记录在这里哦！\n\n认证链接：${authUrl}`;
+        
+        // 更新用户状态为已认证（等待回调完成初始化）
+        userStates.set(external_userid, USER_STATES.AUTHENTICATED);
+        
+        addProcessingLog('KF', '发送认证链接给新用户', {
+          external_userid,
+          auth_url: authUrl
+        });
+        break;
+        
+      case USER_STATES.AUTHENTICATED:
+        // 已认证但未初始化：提示用户完成认证
+        replyContent = '请先完成飞书认证流程，认证完成后即可开始使用随心记功能！';
+        shouldSendReply = true;
+        
+        addProcessingLog('KF', '提示用户完成认证', { external_userid });
+        break;
+        
+      case USER_STATES.INITIALIZED:
+        // 已初始化用户：进行AI处理并记录到飞书
+        const feishuData = userFeishuData.get(external_userid);
+        
+        if (!feishuData) {
+          // 飞书数据丢失，重新认证
+          userStates.set(external_userid, USER_STATES.UNAUTH);
+          const authUrl = generateFeishuAuthUrl();
+          replyContent = `抱歉，您的认证信息已过期，请重新进行飞书认证：\n\n${authUrl}`;
+          break;
+        }
+        
+        try {
+          // 1. 调用豆包AI生成概括
+          addProcessingLog('KF', '开始AI处理用户内容', {
+            external_userid,
+            content_length: userContent.length
+          });
+          
+          const aiResult = await callDoubaoAPI(userContent);
+          const aiSummary = aiResult.content;
+          
+          addProcessingLog('KF', 'AI处理完成', {
+            external_userid,
+            ai_summary: aiSummary
+          });
+          
+          // 2. 更新飞书文档
+          addProcessingLog('KF', '开始更新飞书文档', {
+            external_userid,
+            main_document_id: feishuData.main_document_id
+          });
+          
+          const updateResult = await updateMainFeishuDocument(
+            feishuData.access_token,
+            feishuData.main_document_id,
+            userContent,
+            aiSummary
+          );
+          
+          if (updateResult.success) {
+            replyContent = '✅ 已记录！内容已保存到你的飞书文档中。';
+            addProcessingLog('KF', '飞书文档更新成功', {
+              external_userid,
+              ai_summary: aiSummary
+            });
+          } else {
+            replyContent = '❌ 记录失败，请稍后重试。';
+            addProcessingLog('ERROR', '飞书文档更新失败', {
+              external_userid,
+              error: updateResult.error
+            });
+          }
+        } catch (error) {
+          console.error('处理已初始化用户消息失败:', error);
+          replyContent = '❌ 处理失败，请稍后重试。';
+          addProcessingLog('ERROR', '处理已初始化用户消息失败', {
+            external_userid,
+            error: error.message
+          });
+        }
+        break;
+        
+      default:
+        replyContent = '系统异常，请稍后重试。';
+        addProcessingLog('ERROR', '未知用户状态', {
+          external_userid,
+          state: currentState
+        });
+    }
+    
+    // 发送回复
+    if (shouldSendReply && replyContent) {
+      const replyData = {
+        touser: external_userid,
+        open_kfid: msg.open_kfid,
+        msgtype: 'text',
+        text: {
+          content: replyContent
+        }
+      };
       
-      // 记录消息内容到日志
-      addProcessingLog('KF', '用户发送的消息内容', {
-        content: msg.text.content,
-        msgid: msg.msgid,
-        external_userid: msg.external_userid
+      const replyResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${accessToken}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(replyData)
       });
       
-      // 检查是否需要发送自动回复（防止频繁回复）
-      const now = Date.now();
-      const lastReplyTime = userLastReplyTime.get(msg.external_userid);
-      const replyInterval = 3000; // 3秒内不重复回复
+      const replyResult = await replyResponse.json();
       
-      if (!lastReplyTime || (now - lastReplyTime) > replyInterval) {
-        // 发送自动回复（包含用户发送的消息内容）
-        const replyData = {
-          touser: msg.external_userid,
-          open_kfid: msg.open_kfid,
-          msgtype: 'text',
-          text: {
-            content: `收到您的消息："${msg.text.content}"，是的长官！`
-          }
-        };
+      if (replyResult.errcode === 0) {
+        // 更新最后回复时间
+        userLastReplyTime.set(external_userid, now);
         
-        const replyResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${accessToken}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(replyData)
+        addProcessingLog('KF', '回复发送成功', {
+          msgid: replyResult.msgid,
+          external_userid,
+          user_state: currentState,
+          reply_length: replyContent.length
         });
-        
-        const replyResult = await replyResponse.json();
-        
-        if (replyResult.errcode === 0) {
-          // 更新最后回复时间
-          userLastReplyTime.set(msg.external_userid, now);
-          
-          addProcessingLog('KF', '自动回复发送成功', {
-            msgid: replyResult.msgid,
-            external_userid: msg.external_userid,
-            user_message: msg.text.content,
-            reply_content: `收到您的消息："${msg.text.content}"，是的长官！`
-          });
-          console.log('自动回复发送成功！消息ID:', replyResult.msgid);
-        } else {
-          addProcessingLog('ERROR', '自动回复发送失败', {
-            errcode: replyResult.errcode,
-            errmsg: replyResult.errmsg
-          });
-          console.error('自动回复发送失败:', replyResult);
-        }
+        console.log('回复发送成功！消息ID:', replyResult.msgid);
       } else {
-        addProcessingLog('KF', '跳过自动回复（频率限制）', {
-          external_userid: msg.external_userid,
-          last_reply_ago: Math.round((now - lastReplyTime) / 1000) + '秒前',
-          interval_limit: replyInterval / 1000 + '秒'
+        addProcessingLog('ERROR', '回复发送失败', {
+          errcode: replyResult.errcode,
+          errmsg: replyResult.errmsg,
+          external_userid
         });
-        console.log(`用户 ${msg.external_userid} 在${Math.round((now - lastReplyTime) / 1000)}秒前已回复过，跳过本次回复`);
+        console.error('回复发送失败:', replyResult);
       }
     }
     
@@ -601,7 +1255,8 @@ async function processKfUserMessage(msg, accessToken) {
   } catch (error) {
     addProcessingLog('ERROR', '处理用户消息失败', {
       errorType: error.constructor.name,
-      errorMessage: error.message
+      errorMessage: error.message,
+      external_userid: msg.external_userid
     });
     console.error('处理用户消息失败:', error);
   }
@@ -692,6 +1347,8 @@ async function sendAutoReply(fromUser) {
   }
 }
 
+// ===== 调试接口 =====
+
 // 获取access_token
 router.get('/access-token', async (req, res) => {
   try {
@@ -716,6 +1373,60 @@ router.get('/access-token', async (req, res) => {
     console.error('获取access_token失败:', error);
     res.status(500).json({ error: '获取access_token失败', message: error.message });
   }
+});
+
+// 查看用户状态
+router.get('/debug/user-states', (req, res) => {
+  const states = Array.from(userStates.entries()).map(([userid, state]) => {
+    const feishuData = userFeishuData.get(userid);
+    return {
+      external_userid: userid,
+      state: state,
+      user_name: feishuData?.user_name || 'N/A',
+      has_feishu_data: !!feishuData,
+      main_document_id: feishuData?.main_document_id || 'N/A'
+    };
+  });
+  
+  res.json({
+    total_users: states.length,
+    user_states: states,
+    state_definitions: USER_STATES,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 手动重置用户状态（调试用）
+router.post('/debug/reset-user-state', (req, res) => {
+  const { external_userid } = req.body;
+  
+  if (!external_userid) {
+    return res.status(400).json({ error: '缺少external_userid参数' });
+  }
+  
+  userStates.delete(external_userid);
+  userFeishuData.delete(external_userid);
+  userLastReplyTime.delete(external_userid);
+  
+  addProcessingLog('DEBUG', '用户状态已重置', { external_userid });
+  
+  res.json({
+    success: true,
+    message: '用户状态已重置',
+    external_userid: external_userid
+  });
+});
+
+// 测试生成认证链接
+router.get('/debug/auth-url/:userid?', (req, res) => {
+  const userid = req.params.userid || 'test_user_123';
+  const authUrl = generateFeishuAuthUrl(userid);
+  
+  res.json({
+    external_userid: userid,
+    auth_url: authUrl,
+    note: '这是为指定用户生成的飞书认证链接'
+  });
 });
 
 // 发送消息
