@@ -192,9 +192,9 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
 
 async function createMainFeishuDocument(accessToken, userName) {
   try {
-    const documentTitle = `微信随心记 - ${userName}`;
+    const documentTitle = "微信随心记";
     
-    // 1. 创建文档
+    // 创建文档，不添加任何初始内容
     const createResponse = await fetch('https://open.feishu.cn/open-apis/docx/v1/documents', {
       method: 'POST',
       headers: {
@@ -216,52 +216,13 @@ async function createMainFeishuDocument(accessToken, userName) {
 
     const documentId = createData.data.document.document_id;
 
-    // 2. 添加初始内容
-    const initialContent = `# 微信随心记 - ${userName}\n\n欢迎使用微信随心记！你的所有消息都会记录在这里。\n\n创建时间：${new Date().toLocaleString('zh-CN')}\n\n---\n`;
-    
-    const contentResponse = await fetch(
-      `https://open.feishu.cn/open-apis/docx/v1/documents/${documentId}/blocks/${documentId}/children`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          children: [
-            {
-              block_type: 2, // 文本块
-              text: {
-                elements: [
-                  {
-                    text_run: {
-                      content: initialContent,
-                      text_element_style: {}
-                    }
-                  }
-                ],
-                style: {}
-              }
-            }
-          ],
-          index: 0
-        })
-      }
-    );
-
-    const contentData = await contentResponse.json();
-    console.log('添加初始内容响应状态:', contentData.code);
-
-    if (contentData.code === 0) {
-      return {
-        success: true,
-        documentId: documentId,
-        title: documentTitle,
-        url: `https://bytedance.feishu.cn/docx/${documentId}`
-      };
-    } else {
-      return { success: false, error: `添加文档内容失败: ${contentData.msg}` };
-    }
+    // 直接返回成功，不添加任何初始内容
+    return {
+      success: true,
+      documentId: documentId,
+      title: documentTitle,
+      url: `https://bytedance.feishu.cn/docx/${documentId}`
+    };
 
   } catch (error) {
     console.error('创建飞书主文档异常:', error);
