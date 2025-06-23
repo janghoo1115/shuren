@@ -43,6 +43,63 @@ let userStates = new Map(); // external_userid -> state
 // 存储用户飞书信息
 let userFeishuData = new Map(); // external_userid -> { access_token, main_document_id, user_name }
 
+// ===== 新增：持久化用户数据管理 =====
+const fs = require('fs');
+const path = require('path');
+const USER_DATA_FILE = path.join(__dirname, '../data/user_data.json');
+
+// 确保数据目录存在
+const dataDir = path.dirname(USER_DATA_FILE);
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+// 加载持久化用户数据
+function loadUserData() {
+  try {
+    if (fs.existsSync(USER_DATA_FILE)) {
+      const data = JSON.parse(fs.readFileSync(USER_DATA_FILE, 'utf8'));
+      // 恢复到内存Map中
+      Object.entries(data.userStates || {}).forEach(([key, value]) => {
+        userStates.set(key, value);
+      });
+      Object.entries(data.userFeishuData || {}).forEach(([key, value]) => {
+        userFeishuData.set(key, value);
+      });
+      console.log('用户数据加载成功，用户数量:', userStates.size);
+    }
+  } catch (error) {
+    console.error('加载用户数据失败:', error);
+  }
+}
+
+// 保存持久化用户数据
+function saveUserData() {
+  try {
+    const data = {
+      userStates: Object.fromEntries(userStates),
+      userFeishuData: Object.fromEntries(userFeishuData),
+      lastUpdated: new Date().toISOString()
+    };
+    fs.writeFileSync(USER_DATA_FILE, JSON.stringify(data, null, 2));
+    console.log('用户数据保存成功');
+  } catch (error) {
+    console.error('保存用户数据失败:', error);
+  }
+}
+
+// 更新用户状态并持久化
+function updateUserState(external_userid, state, feishuData = null) {
+  userStates.set(external_userid, state);
+  if (feishuData) {
+    userFeishuData.set(external_userid, feishuData);
+  }
+  saveUserData();
+}
+
+// 应用启动时加载数据
+loadUserData();
+
 // ===== 飞书配置 =====
 const FEISHU_CONFIG = {
   app_id: process.env.FEISHU_APP_ID || "cli_a8c3c35f5230d00e",
@@ -135,6 +192,46 @@ async function callDoubaoAPI(userContent) {
       success: true,
       content: userContent.length > 20 ? userContent.substring(0, 20) + '...' : userContent
     };
+  }
+}
+
+// ===== 新增：检测飞书文档是否存在 =====
+async function checkFeishuDocumentExists(accessToken, documentId) {
+  try {
+    const response = await fetch(
+      `https://open.feishu.cn/open-apis/docx/v1/documents/${documentId}`,
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const data = await response.json();
+    
+    // 文档存在且有权限访问
+    if (data.code === 0) {
+      return { exists: true, accessible: true };
+    }
+    
+    // 文档不存在或已被删除
+    if (data.code === 99991663 || data.code === 99991664 || data.code === 1254044) {
+      return { exists: false, accessible: false, reason: '文档已被删除或不存在' };
+    }
+    
+    // 权限不足
+    if (data.code === 99991661 || data.code === 99991662) {
+      return { exists: true, accessible: false, reason: '权限不足' };
+    }
+    
+    // 其他错误
+    return { exists: false, accessible: false, reason: data.msg || '未知错误' };
+    
+  } catch (error) {
+    console.error('检查文档存在性异常:', error);
+    return { exists: false, accessible: false, reason: '网络错误' };
   }
 }
 
@@ -273,8 +370,7 @@ router.post('/update-user-status', async (req, res) => {
     }
     
     // 更新用户状态为已初始化
-    userStates.set(external_userid, USER_STATES.INITIALIZED);
-    userFeishuData.set(external_userid, {
+    updateUserState(external_userid, USER_STATES.INITIALIZED, {
       access_token,
       main_document_id,
       user_name: user_name || '用户'
@@ -447,8 +543,7 @@ router.all('/feishu-auth', async (req, res) => {
     
     // 如果有external_userid，更新用户状态
     if (external_userid) {
-      userStates.set(external_userid, USER_STATES.INITIALIZED);
-      userFeishuData.set(external_userid, {
+      updateUserState(external_userid, USER_STATES.INITIALIZED, {
         access_token: accessToken,
         main_document_id: createResult.documentId,
         user_name: userInfo.name || '用户'
@@ -1098,7 +1193,7 @@ async function processKfUserMessage(msg, accessToken) {
         replyContent = `Hi，欢迎使用随心记。如果你是第一次使用，记得点击以下链接进行飞书认证哦！认证结束我会在你的飞书创建名为"微信随心记"的文档，以后的所有内容都会记录在这里哦！\n\n认证链接：${authUrl}`;
         
         // 更新用户状态为已认证（等待回调完成初始化）
-        userStates.set(external_userid, USER_STATES.AUTHENTICATED);
+        updateUserState(external_userid, USER_STATES.AUTHENTICATED);
         
         addProcessingLog('KF', '发送认证链接给新用户', {
           external_userid,
@@ -1120,14 +1215,36 @@ async function processKfUserMessage(msg, accessToken) {
         
         if (!feishuData) {
           // 飞书数据丢失，重新认证
-          userStates.set(external_userid, USER_STATES.UNAUTH);
-          const authUrl = generateFeishuAuthUrl();
+          updateUserState(external_userid, USER_STATES.UNAUTH);
+          const authUrl = generateFeishuAuthUrl(external_userid);
           replyContent = `抱歉，您的认证信息已过期，请重新进行飞书认证：\n\n${authUrl}`;
           break;
         }
         
         try {
-          // 1. 调用豆包AI生成概括
+          // 1. 检查飞书文档是否还存在
+          addProcessingLog('KF', '检查飞书文档存在性', {
+            external_userid,
+            main_document_id: feishuData.main_document_id
+          });
+          
+          const docCheck = await checkFeishuDocumentExists(feishuData.access_token, feishuData.main_document_id);
+          
+          if (!docCheck.exists || !docCheck.accessible) {
+            // 文档不存在或无权限，需要重新认证
+            updateUserState(external_userid, USER_STATES.UNAUTH);
+            const authUrl = generateFeishuAuthUrl(external_userid);
+            replyContent = `❌ 记录失败！检测到您的飞书文档"微信随心记"已被删除或无法访问。\n\n请重新认证以创建新的文档：\n${authUrl}`;
+            
+            addProcessingLog('ERROR', '飞书文档不存在，引导重新认证', {
+              external_userid,
+              reason: docCheck.reason,
+              main_document_id: feishuData.main_document_id
+            });
+            break;
+          }
+          
+          // 2. 调用豆包AI生成概括
           addProcessingLog('KF', '开始AI处理用户内容', {
             external_userid,
             content_length: userContent.length
@@ -1141,7 +1258,7 @@ async function processKfUserMessage(msg, accessToken) {
             ai_summary: aiSummary
           });
           
-          // 2. 更新飞书文档
+          // 3. 更新飞书文档
           addProcessingLog('KF', '开始更新飞书文档', {
             external_userid,
             main_document_id: feishuData.main_document_id
@@ -1352,6 +1469,24 @@ router.get('/access-token', async (req, res) => {
   }
 });
 
+// 重新加载用户数据
+router.post('/debug/reload-user-data', (req, res) => {
+  try {
+    loadUserData();
+    res.json({
+      success: true,
+      message: '用户数据重新加载成功',
+      total_users: userStates.size,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: '重新加载用户数据失败',
+      message: error.message
+    });
+  }
+});
+
 // 查看用户状态
 router.get('/debug/user-states', (req, res) => {
   const states = Array.from(userStates.entries()).map(([userid, state]) => {
@@ -1384,6 +1519,9 @@ router.post('/debug/reset-user-state', (req, res) => {
   userStates.delete(external_userid);
   userFeishuData.delete(external_userid);
   userLastReplyTime.delete(external_userid);
+  
+  // 保存更改到持久化存储
+  saveUserData();
   
   addProcessingLog('DEBUG', '用户状态已重置', { external_userid });
   
