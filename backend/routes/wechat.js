@@ -248,21 +248,21 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
         },
         body: JSON.stringify({
           children: [
-            // H3标题块（使用正确的格式）
+            // 先尝试简单的方案：使用粗体文本块模拟H3标题
             {
-              block_type: 3, // 标题块
-              heading: {
+              block_type: 2, // 文本块
+              text: {
                 elements: [
                   {
                     text_run: {
                       content: titleContent,
-                      text_element_style: {}
+                      text_element_style: {
+                        bold: true // 粗体模拟标题
+                      }
                     }
                   }
                 ],
-                style: {
-                  level: 3 // H3级别
-                }
+                style: {}
               }
             },
             // 内容文本块
@@ -287,7 +287,7 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
                 elements: [
                   {
                     text_run: {
-                      content: "",
+                      content: "\n",
                       text_element_style: {}
                     }
                   }
