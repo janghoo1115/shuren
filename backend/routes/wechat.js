@@ -235,9 +235,8 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
     const currentDate = new Date().toLocaleDateString('zh-CN');
     const currentTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     
-    // 先尝试使用文本块，但格式化为粗体标题
+    // 标题内容（不包含markdown符号）
     const titleContent = `${currentDate} ${currentTime} - ${aiSummary}`;
-    const fullContent = `**${titleContent}**\n\n${userContent}\n\n`;
     
     const updateResponse = await fetch(
       `https://open.feishu.cn/open-apis/docx/v1/documents/${mainDocumentId}/blocks/${mainDocumentId}/children`,
@@ -249,16 +248,49 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
         },
         body: JSON.stringify({
           children: [
+            // H3标题块
+            {
+              block_type: 5, // 标题3块（对应H3）
+              heading: {
+                elements: [
+                  {
+                    text_run: {
+                      content: titleContent,
+                      text_element_style: {}
+                    }
+                  }
+                ],
+                style: {}
+              }
+            },
+            // 内容文本块
             {
               block_type: 2, // 文本块
               text: {
                 elements: [
                   {
                     text_run: {
-                      content: fullContent
+                      content: userContent,
+                      text_element_style: {}
                     }
                   }
-                ]
+                ],
+                style: {}
+              }
+            },
+            // 空行分隔
+            {
+              block_type: 2, // 文本块
+              text: {
+                elements: [
+                  {
+                    text_run: {
+                      content: " ",
+                      text_element_style: {}
+                    }
+                  }
+                ],
+                style: {}
               }
             }
           ],
