@@ -248,9 +248,9 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
         },
         body: JSON.stringify({
           children: [
-            // H3标题块
+            // H3标题块（使用正确的格式）
             {
-              block_type: 5, // 标题3块（对应H3）
+              block_type: 3, // 标题块
               heading: {
                 elements: [
                   {
@@ -260,7 +260,9 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
                     }
                   }
                 ],
-                style: {}
+                style: {
+                  level: 3 // H3级别
+                }
               }
             },
             // 内容文本块
@@ -285,7 +287,7 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
                 elements: [
                   {
                     text_run: {
-                      content: " ",
+                      content: "",
                       text_element_style: {}
                     }
                   }
