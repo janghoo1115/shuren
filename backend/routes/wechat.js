@@ -235,8 +235,8 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
     const currentDate = new Date().toLocaleDateString('zh-CN');
     const currentTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     
-    // 临时使用简单的文本格式，避免复杂的标题块导致的参数错误
-    const titleContent = `\n### ${currentDate} ${currentTime} - ${aiSummary}\n\n${userContent}\n\n`;
+    // 标题内容（不包含###前缀）
+    const titleContent = `${currentDate} ${currentTime} - ${aiSummary}`;
     
     const updateResponse = await fetch(
       `https://open.feishu.cn/open-apis/docx/v1/documents/${mainDocumentId}/blocks/${mainDocumentId}/children`,
@@ -248,13 +248,44 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
         },
         body: JSON.stringify({
           children: [
+            // 添加H3标题块
             {
-              block_type: 2, // 使用文本块而不是标题块
-              text: {
+              block_type: 3, // 标题块
+              heading: {
                 elements: [
                   {
                     text_run: {
                       content: titleContent,
+                      text_element_style: {}
+                    }
+                  }
+                ],
+                level: 3 // H3级别
+              }
+            },
+            // 添加内容文本块
+            {
+              block_type: 2, // 文本块
+              text: {
+                elements: [
+                  {
+                    text_run: {
+                      content: userContent,
+                      text_element_style: {}
+                    }
+                  }
+                ],
+                style: {}
+              }
+            },
+            // 添加空行
+            {
+              block_type: 2, // 文本块
+              text: {
+                elements: [
+                  {
+                    text_run: {
+                      content: "\n",
                       text_element_style: {}
                     }
                   }
