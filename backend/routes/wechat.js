@@ -255,12 +255,11 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
                 elements: [
                   {
                     text_run: {
-                      content: titleContent,
-                      text_element_style: {}
+                      content: titleContent
                     }
                   }
                 ],
-                level: 3 // H3级别
+                level: 3
               }
             },
             // 添加内容文本块
@@ -270,12 +269,10 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
                 elements: [
                   {
                     text_run: {
-                      content: userContent,
-                      text_element_style: {}
+                      content: userContent
                     }
                   }
-                ],
-                style: {}
+                ]
               }
             },
             // 添加空行
@@ -285,12 +282,10 @@ async function updateMainFeishuDocument(accessToken, mainDocumentId, userContent
                 elements: [
                   {
                     text_run: {
-                      content: "\n",
-                      text_element_style: {}
+                      content: "\n"
                     }
                   }
-                ],
-                style: {}
+                ]
               }
             }
           ],
