@@ -37,68 +37,62 @@ const USER_STATES = {
   INITIALIZED: 'initialized'      // 已初始化，可以正常使用
 };
 
-// 存储用户状态
-let userStates = new Map(); // external_userid -> state
+// ===== 新增：Supabase数据存储 =====
+const supabaseStore = require('../utils/supabase-store');
 
-// 存储用户飞书信息
-let userFeishuData = new Map(); // external_userid -> { access_token, main_document_id, user_name }
-
-// ===== 新增：持久化用户数据管理 =====
-const fs = require('fs');
-const path = require('path');
-const USER_DATA_FILE = path.join(__dirname, '../data/user_data.json');
-
-// 确保数据目录存在
-const dataDir = path.dirname(USER_DATA_FILE);
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+// 更新用户状态并持久化到Supabase
+async function updateUserState(external_userid, state, feishuData = null) {
+  try {
+    const result = await supabaseStore.saveUser(external_userid, state, feishuData);
+    if (result.success) {
+      console.log(`✅ 用户状态已更新到Supabase: ${external_userid} -> ${state}`);
+    } else {
+      console.error(`❌ 更新用户状态失败: ${result.error}`);
+    }
+    return result;
+  } catch (error) {
+    console.error('❌ 更新用户状态异常:', error);
+    return { success: false, error: error.message };
+  }
 }
 
-// 加载持久化用户数据
-function loadUserData() {
+// 获取用户状态从Supabase
+async function getUserState(external_userid) {
   try {
-    if (fs.existsSync(USER_DATA_FILE)) {
-      const data = JSON.parse(fs.readFileSync(USER_DATA_FILE, 'utf8'));
-      // 恢复到内存Map中
-      Object.entries(data.userStates || {}).forEach(([key, value]) => {
-        userStates.set(key, value);
-      });
-      Object.entries(data.userFeishuData || {}).forEach(([key, value]) => {
-        userFeishuData.set(key, value);
-      });
-      console.log('用户数据加载成功，用户数量:', userStates.size);
+    const result = await supabaseStore.getUser(external_userid);
+    if (result.success) {
+      return {
+        state: result.data.state,
+        feishuData: {
+          access_token: result.data.access_token,
+          main_document_id: result.data.main_document_id,
+          user_name: result.data.user_name
+        }
+      };
+    } else {
+      // 用户不存在，返回未认证状态
+      return {
+        state: USER_STATES.UNAUTH,
+        feishuData: null
+      };
     }
   } catch (error) {
-    console.error('加载用户数据失败:', error);
-  }
-}
-
-// 保存持久化用户数据
-function saveUserData() {
-  try {
-    const data = {
-      userStates: Object.fromEntries(userStates),
-      userFeishuData: Object.fromEntries(userFeishuData),
-      lastUpdated: new Date().toISOString()
+    console.error('❌ 获取用户状态异常:', error);
+    return {
+      state: USER_STATES.UNAUTH,
+      feishuData: null
     };
-    fs.writeFileSync(USER_DATA_FILE, JSON.stringify(data, null, 2));
-    console.log('用户数据保存成功');
-  } catch (error) {
-    console.error('保存用户数据失败:', error);
   }
 }
 
-// 更新用户状态并持久化
-function updateUserState(external_userid, state, feishuData = null) {
-  userStates.set(external_userid, state);
-  if (feishuData) {
-    userFeishuData.set(external_userid, feishuData);
+// 应用启动时测试Supabase连接
+supabaseStore.testConnection().then(connected => {
+  if (connected) {
+    console.log('✅ Supabase数据库连接正常');
+  } else {
+    console.error('❌ Supabase数据库连接失败，请检查配置');
   }
-  saveUserData();
-}
-
-// 应用启动时加载数据
-loadUserData();
+});
 
 // ===== 飞书配置 =====
 const FEISHU_CONFIG = {
@@ -527,29 +521,29 @@ router.all('/feishu-auth', async (req, res) => {
       });
     }
     
-    // 如果有external_userid，更新用户状态
-    if (external_userid) {
-      updateUserState(external_userid, USER_STATES.INITIALIZED, {
-        access_token: accessToken,
-        main_document_id: createResult.documentId,
-        user_name: userInfo.name || '用户'
-      });
-      
-      addProcessingLog('FEISHU_AUTH', '飞书认证完成并更新用户状态', {
-        external_userid,
-        user_name: userInfo.name,
-        main_document_id: createResult.documentId
-      });
-      
-      // 异步发送确认消息
-      setTimeout(async () => {
-        try {
-          await sendConfirmationMessage(external_userid);
-        } catch (error) {
-          console.error('发送确认消息失败:', error);
-        }
-      }, 1000);
-    }
+      // 如果有external_userid，更新用户状态
+  if (external_userid) {
+    await updateUserState(external_userid, USER_STATES.INITIALIZED, {
+      access_token: accessToken,
+      main_document_id: createResult.documentId,
+      user_name: userInfo.name || '用户'
+    });
+    
+    addProcessingLog('FEISHU_AUTH', '飞书认证完成并更新用户状态', {
+      external_userid,
+      user_name: userInfo.name,
+      main_document_id: createResult.documentId
+    });
+    
+    // 异步发送确认消息
+    setTimeout(async () => {
+      try {
+        await sendConfirmationMessage(external_userid);
+      } catch (error) {
+        console.error('发送确认消息失败:', error);
+      }
+    }, 1000);
+  }
     
     // 返回成功页面HTML
     const successHtml = `
@@ -1148,7 +1142,9 @@ async function processKfUserMessage(msg, accessToken) {
     console.log('消息内容:', userContent);
     
     // 检查用户状态
-    const currentState = userStates.get(external_userid) || USER_STATES.UNAUTH;
+    // 从Supabase获取当前用户状态
+    const userInfo = await getUserState(external_userid);
+    const currentState = userInfo.state;
     addProcessingLog('KF', '用户当前状态', {
       external_userid,
       state: currentState,
@@ -1179,7 +1175,7 @@ async function processKfUserMessage(msg, accessToken) {
         replyContent = `Hi，欢迎使用随心记。如果你是第一次使用，记得点击以下链接进行飞书认证哦！认证结束我会在你的飞书创建名为"微信随心记"的文档，以后的所有内容都会记录在这里哦！\n\n认证链接：${authUrl}`;
         
         // 更新用户状态为已认证（等待回调完成初始化）
-        updateUserState(external_userid, USER_STATES.AUTHENTICATED);
+        await updateUserState(external_userid, USER_STATES.AUTHENTICATED);
         
         addProcessingLog('KF', '发送认证链接给新用户', {
           external_userid,
@@ -1197,11 +1193,11 @@ async function processKfUserMessage(msg, accessToken) {
         
       case USER_STATES.INITIALIZED:
         // 已初始化用户：进行AI处理并记录到飞书
-        const feishuData = userFeishuData.get(external_userid);
+        const feishuData = userInfo.feishuData;
         
-        if (!feishuData) {
+        if (!feishuData || !feishuData.access_token || !feishuData.main_document_id) {
           // 飞书数据丢失，重新认证
-          updateUserState(external_userid, USER_STATES.UNAUTH);
+          await updateUserState(external_userid, USER_STATES.UNAUTH);
           const authUrl = generateFeishuAuthUrl(external_userid);
           replyContent = `抱歉，您的认证信息已过期，请重新进行飞书认证：\n\n${authUrl}`;
           break;
@@ -1218,7 +1214,7 @@ async function processKfUserMessage(msg, accessToken) {
           
           if (!docCheck.exists || !docCheck.accessible) {
             // 文档不存在或无权限，需要重新认证
-            updateUserState(external_userid, USER_STATES.UNAUTH);
+            await updateUserState(external_userid, USER_STATES.UNAUTH);
             const authUrl = generateFeishuAuthUrl(external_userid);
             replyContent = `❌ 记录失败！检测到您的飞书文档"微信随心记"已被删除或无法访问。\n\n请重新认证以创建新的文档：\n${authUrl}`;
             
@@ -1456,13 +1452,13 @@ router.get('/access-token', async (req, res) => {
 });
 
 // 重新加载用户数据
-router.post('/debug/reload-user-data', (req, res) => {
+router.post('/debug/reload-user-data', async (req, res) => {
   try {
     loadUserData();
     res.json({
       success: true,
       message: '用户数据重新加载成功',
-      total_users: userStates.size,
+      supabase_connection: await supabaseStore.testConnection(),
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -1474,17 +1470,15 @@ router.post('/debug/reload-user-data', (req, res) => {
 });
 
 // 查看用户状态
-router.get('/debug/user-states', (req, res) => {
-  const states = Array.from(userStates.entries()).map(([userid, state]) => {
-    const feishuData = userFeishuData.get(userid);
-    return {
-      external_userid: userid,
-      state: state,
-      user_name: feishuData?.user_name || 'N/A',
-      has_feishu_data: !!feishuData,
-      main_document_id: feishuData?.main_document_id || 'N/A'
-    };
-  });
+router.get('/debug/user-states', async (req, res) => {
+  const allUsers = await supabaseStore.getAllUsers();
+  const states = allUsers.success ? allUsers.data.map(user => ({
+    external_userid: user.external_userid,
+    state: user.state,
+    user_name: user.user_name || 'N/A',
+    has_token: !!user.access_token,
+    main_document_id: user.main_document_id || 'N/A'
+  })) : [];
   
   res.json({
     total_users: states.length,
@@ -1495,26 +1489,24 @@ router.get('/debug/user-states', (req, res) => {
 });
 
 // 手动重置用户状态（调试用）
-router.post('/debug/reset-user-state', (req, res) => {
+router.post('/debug/reset-user-state', async (req, res) => {
   const { external_userid } = req.body;
   
   if (!external_userid) {
     return res.status(400).json({ error: '缺少external_userid参数' });
   }
   
-  userStates.delete(external_userid);
-  userFeishuData.delete(external_userid);
+  // 从Supabase删除用户数据
+  const result = await supabaseStore.deleteUser(external_userid);
   userLastReplyTime.delete(external_userid);
-  
-  // 保存更改到持久化存储
-  saveUserData();
   
   addProcessingLog('DEBUG', '用户状态已重置', { external_userid });
   
   res.json({
     success: true,
     message: '用户状态已重置',
-    external_userid: external_userid
+    external_userid: external_userid,
+    supabase_result: result
   });
 });
 
@@ -1539,7 +1531,8 @@ router.post('/debug/test-doc-access', async (req, res) => {
       return res.status(400).json({ error: '缺少external_userid参数' });
     }
     
-    const feishuData = userFeishuData.get(external_userid);
+    const userInfo = await getUserState(external_userid);
+    const feishuData = userInfo.feishuData;
     
     if (!feishuData) {
       return res.json({
