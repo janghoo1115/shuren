@@ -1229,10 +1229,17 @@ async function processKfUserMessage(msg, accessToken) {
         const feishuData = userInfo.feishuData;
         
         if (!feishuData || !feishuData.access_token || !feishuData.main_document_id) {
-          // 飞书数据丢失，重新认证
-          await updateUserState(external_userid, USER_STATES.UNAUTH);
+          // 飞书数据丢失，但不重置用户状态，只提示重新认证
           const authUrl = generateFeishuAuthUrl(external_userid);
-          replyContent = `抱歉，您的认证信息已过期，请重新进行飞书认证：\n\n${authUrl}`;
+          replyContent = `⚠️ 检测到您的认证信息可能已过期，请重新进行飞书认证：\n\n${authUrl}\n\n如果认证后仍有问题，请联系管理员。`;
+          
+          addProcessingLog('WARN', '飞书数据缺失，提示重新认证但保留用户状态', {
+            external_userid,
+            missing_data: {
+              access_token: !feishuData?.access_token,
+              main_document_id: !feishuData?.main_document_id
+            }
+          });
           break;
         }
         
@@ -1246,15 +1253,16 @@ async function processKfUserMessage(msg, accessToken) {
           const docCheck = await checkFeishuDocumentExists(feishuData.access_token, feishuData.main_document_id);
           
           if (!docCheck.exists || !docCheck.accessible) {
-            // 文档不存在或无权限，需要重新认证
-            await updateUserState(external_userid, USER_STATES.UNAUTH);
+            // 文档不存在或无权限，但不重置用户状态，只提示重新认证
             const authUrl = generateFeishuAuthUrl(external_userid);
-            replyContent = `❌ 记录失败！检测到您的飞书文档"微信随心记"已被删除或无法访问。\n\n请重新认证以创建新的文档：\n${authUrl}`;
+            replyContent = `⚠️ 检测到您的飞书文档可能已被删除或无法访问。\n\n原因：${docCheck.reason}\n\n请重新认证以恢复访问：\n${authUrl}\n\n如果问题持续存在，请联系管理员。`;
             
-            addProcessingLog('ERROR', '飞书文档不存在，引导重新认证', {
+            addProcessingLog('WARN', '飞书文档不可访问，提示重新认证但保留用户状态', {
               external_userid,
               reason: docCheck.reason,
-              main_document_id: feishuData.main_document_id
+              main_document_id: feishuData.main_document_id,
+              doc_exists: docCheck.exists,
+              doc_accessible: docCheck.accessible
             });
             break;
           }
