@@ -1238,10 +1238,10 @@ async function processKfUserMessage(msg, accessToken) {
         const feishuData = userInfo.feishuData;
         
         try {
-          // 1. 检查并刷新access_token
+          // 1. 检查access_token是否可用
           addProcessingLog('KF', '开始检查access_token状态', { external_userid });
           
-          const tokenResult = await checkAndRefreshAccessToken(external_userid, feishuData);
+          const tokenResult = await checkAccessToken(external_userid, feishuData);
           
           if (!tokenResult.success) {
             // Token刷新失败，需要重新认证
@@ -2324,141 +2324,137 @@ router.get('/test', (req, res) => {
   res.send(html);
 });
 
-// 检查access_token是否过期并自动刷新
-async function checkAndRefreshAccessToken(external_userid, feishuData) {
+// 检查access_token是否可用
+async function checkAccessToken(external_userid, feishuData) {
   try {
     // 如果没有access_token，直接返回需要重新认证
     if (!feishuData || !feishuData.access_token) {
       return { success: false, needReauth: true, reason: '缺少access_token' };
     }
 
-    // 检查token是否快要过期（剩余30分钟内）
-    const now = Date.now();
-    const tokenExpireTime = feishuData.token_expire_time || 0;
-    const timeLeft = tokenExpireTime - now;
-    
-    addProcessingLog('TOKEN', '检查access_token状态', {
-      external_userid,
-      token_expire_time: new Date(tokenExpireTime).toISOString(),
-      time_left_minutes: Math.floor(timeLeft / (60 * 1000)),
-      needs_refresh: timeLeft < 30 * 60 * 1000
-    });
+    addProcessingLog('TOKEN', '开始验证access_token有效性', { external_userid });
 
-    // 如果token还有超过30分钟有效期，直接返回成功
-    if (timeLeft > 30 * 60 * 1000) {
-      return { success: true, access_token: feishuData.access_token };
-    }
-
-    // 尝试使用refresh_token刷新access_token
-    if (!feishuData.refresh_token) {
-      addProcessingLog('TOKEN', '缺少refresh_token，需要重新认证', { external_userid });
-      return { success: false, needReauth: true, reason: '缺少refresh_token' };
-    }
-
-    addProcessingLog('TOKEN', '开始刷新access_token', { external_userid });
-
-    const refreshResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/refresh_access_token', {
-      method: 'POST',
+    // 尝试调用飞书API验证token是否有效（获取用户信息）
+    const testResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/user_info', {
+      method: 'GET',
       headers: {
+        'Authorization': `Bearer ${feishuData.access_token}`,
         'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        grant_type: 'refresh_token',
-        refresh_token: feishuData.refresh_token
-      })
+      }
     });
 
-    const refreshResult = await refreshResponse.json();
+    const testResult = await testResponse.json();
 
-    if (refreshResult.code === 0) {
-      // 刷新成功，更新Supabase中的token信息
-      const newTokenExpireTime = now + (refreshResult.data.expires_in * 1000);
-      
-      const updatedFeishuData = {
-        ...feishuData,
-        access_token: refreshResult.data.access_token,
-        refresh_token: refreshResult.data.refresh_token,
-        token_expire_time: newTokenExpireTime
-      };
-
-      await updateUserState(external_userid, USER_STATES.INITIALIZED, updatedFeishuData);
-
-      addProcessingLog('TOKEN', 'access_token刷新成功', {
+    if (testResult.code === 0) {
+      // Token有效
+      addProcessingLog('TOKEN', 'access_token验证成功', {
         external_userid,
-        new_expire_time: new Date(newTokenExpireTime).toISOString()
+        user_name: testResult.data?.name
       });
-
-      return { success: true, access_token: refreshResult.data.access_token };
+      return { success: true, access_token: feishuData.access_token };
     } else {
-      addProcessingLog('TOKEN', 'refresh_token刷新失败', {
+      // Token无效或过期
+      addProcessingLog('TOKEN', 'access_token已失效', {
         external_userid,
-        error: refreshResult
+        error_code: testResult.code,
+        error_msg: testResult.msg
       });
-      return { success: false, needReauth: true, reason: 'refresh_token无效或过期' };
+      return { success: false, needReauth: true, reason: `Token已失效: ${testResult.msg}` };
     }
 
   } catch (error) {
-    addProcessingLog('ERROR', 'token刷新过程出错', {
+    addProcessingLog('ERROR', 'token验证过程出错', {
       external_userid,
       error: error.message
     });
-    return { success: false, needReauth: true, reason: `刷新过程出错: ${error.message}` };
+    return { success: false, needReauth: true, reason: `验证过程出错: ${error.message}` };
   }
 }
 
-// 检查或创建飞书文档
+// 检查飞书文档是否可访问，必要时创建新文档
 async function checkOrCreateFeishuDocument(accessToken, feishuData, external_userid, userName) {
   try {
-    // 如果已经有文档ID，先检查文档是否存在
-    if (feishuData.main_document_id) {
-      addProcessingLog('DOC', '检查现有飞书文档', {
-        external_userid,
-        document_id: feishuData.main_document_id
-      });
-
-      const docCheck = await checkFeishuDocumentExists(accessToken, feishuData.main_document_id);
+    // 如果没有文档ID，直接创建新文档
+    if (!feishuData.main_document_id) {
+      addProcessingLog('DOC', '用户没有文档ID，需要创建新文档', { external_userid });
       
-      if (docCheck.exists && docCheck.accessible) {
-        addProcessingLog('DOC', '飞书文档检查通过', { external_userid });
-        return { success: true, document_id: feishuData.main_document_id };
-      } else {
-        addProcessingLog('DOC', '原文档不可访问，需要创建新文档', {
+      const createResult = await createMainFeishuDocument(accessToken, userName || '微信用户');
+      
+      if (createResult.success) {
+        // 更新用户的文档ID到Supabase
+        const updatedFeishuData = {
+          ...feishuData,
+          main_document_id: createResult.document_id
+        };
+
+        await updateUserState(external_userid, USER_STATES.INITIALIZED, updatedFeishuData);
+
+        addProcessingLog('DOC', '飞书文档创建成功并已更新到数据库', {
           external_userid,
-          reason: docCheck.reason
+          document_id: createResult.document_id
         });
+
+        return { success: true, document_id: createResult.document_id };
+      } else {
+        addProcessingLog('ERROR', '飞书文档创建失败', {
+          external_userid,
+          error: createResult.error
+        });
+        return { success: false, error: createResult.error };
       }
     }
 
-    // 创建新的飞书文档
-    addProcessingLog('DOC', '开始创建新的飞书文档', { external_userid });
-    
-    const createResult = await createMainFeishuDocument(accessToken, userName || '微信用户');
-    
-    if (createResult.success) {
-      // 更新用户的文档ID到Supabase
-      const updatedFeishuData = {
-        ...feishuData,
-        main_document_id: createResult.document_id
-      };
+    // 如果有文档ID，检查文档是否存在和可访问
+    addProcessingLog('DOC', '检查现有飞书文档', {
+      external_userid,
+      document_id: feishuData.main_document_id
+    });
 
-      await updateUserState(external_userid, USER_STATES.INITIALIZED, updatedFeishuData);
-
-      addProcessingLog('DOC', '飞书文档创建成功并已更新到数据库', {
+    const docCheck = await checkFeishuDocumentExists(accessToken, feishuData.main_document_id);
+    
+    if (docCheck.exists && docCheck.accessible) {
+      addProcessingLog('DOC', '飞书文档检查通过，可以正常使用', { 
         external_userid,
-        document_id: createResult.document_id
+        document_id: feishuData.main_document_id
       });
-
-      return { success: true, document_id: createResult.document_id };
+      return { success: true, document_id: feishuData.main_document_id };
     } else {
-      addProcessingLog('ERROR', '飞书文档创建失败', {
+      // 文档不存在或不可访问，创建新文档
+      addProcessingLog('DOC', '原文档不可访问，创建新文档', {
         external_userid,
-        error: createResult.error
+        reason: docCheck.reason,
+        old_document_id: feishuData.main_document_id
       });
-      return { success: false, error: createResult.error };
+      
+      const createResult = await createMainFeishuDocument(accessToken, userName || '微信用户');
+      
+      if (createResult.success) {
+        // 更新用户的文档ID到Supabase
+        const updatedFeishuData = {
+          ...feishuData,
+          main_document_id: createResult.document_id
+        };
+
+        await updateUserState(external_userid, USER_STATES.INITIALIZED, updatedFeishuData);
+
+        addProcessingLog('DOC', '新飞书文档创建成功并已更新到数据库', {
+          external_userid,
+          new_document_id: createResult.document_id,
+          old_document_id: feishuData.main_document_id
+        });
+
+        return { success: true, document_id: createResult.document_id };
+      } else {
+        addProcessingLog('ERROR', '创建新飞书文档失败', {
+          external_userid,
+          error: createResult.error
+        });
+        return { success: false, error: createResult.error };
+      }
     }
 
   } catch (error) {
-    addProcessingLog('ERROR', '检查或创建飞书文档过程出错', {
+    addProcessingLog('ERROR', '检查飞书文档过程出错', {
       external_userid,
       error: error.message
     });
