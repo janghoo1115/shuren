@@ -2362,7 +2362,7 @@ router.get('/test', (req, res) => {
   res.send(html);
 });
 
-// 检查access_token是否可用
+// 检查access_token是否可用，支持自动刷新
 async function checkAccessToken(external_userid, feishuData) {
   try {
     // 如果没有access_token，直接返回需要重新认证
@@ -2391,13 +2391,19 @@ async function checkAccessToken(external_userid, feishuData) {
       });
       return { success: true, access_token: feishuData.access_token };
     } else {
-      // Token无效或过期
-      addProcessingLog('TOKEN', 'access_token已失效', {
+      // Token无效或过期，尝试使用refresh_token刷新
+      addProcessingLog('TOKEN', 'access_token已失效，尝试刷新', {
         external_userid,
         error_code: testResult.code,
-        error_msg: testResult.msg
+        error_msg: testResult.msg,
+        has_refresh_token: !!feishuData.refresh_token
       });
-      return { success: false, needReauth: true, reason: `Token已失效: ${testResult.msg}` };
+
+      if (feishuData.refresh_token) {
+        return await refreshAccessToken(external_userid, feishuData);
+      } else {
+        return { success: false, needReauth: true, reason: `Token已失效且无refresh_token: ${testResult.msg}` };
+      }
     }
 
   } catch (error) {
@@ -2406,6 +2412,66 @@ async function checkAccessToken(external_userid, feishuData) {
       error: error.message
     });
     return { success: false, needReauth: true, reason: `验证过程出错: ${error.message}` };
+  }
+}
+
+// 刷新access_token
+async function refreshAccessToken(external_userid, feishuData) {
+  try {
+    addProcessingLog('TOKEN', '开始刷新access_token', { external_userid });
+
+    const refreshResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/refresh_access_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'refresh_token',
+        refresh_token: feishuData.refresh_token,
+        app_id: FEISHU_CONFIG.app_id,
+        app_secret: FEISHU_CONFIG.app_secret
+      })
+    });
+
+    const refreshData = await refreshResponse.json();
+
+    if (refreshData.code === 0) {
+      // 刷新成功，更新用户数据
+      const newAccessToken = refreshData.data.access_token;
+      const newRefreshToken = refreshData.data.refresh_token || feishuData.refresh_token;
+      const expiresIn = refreshData.data.expires_in || 7200;
+      const tokenExpireTime = Date.now() + (expiresIn * 1000);
+
+      const updatedFeishuData = {
+        ...feishuData,
+        access_token: newAccessToken,
+        refresh_token: newRefreshToken,
+        token_expire_time: tokenExpireTime
+      };
+
+      await updateUserState(external_userid, USER_STATES.INITIALIZED, updatedFeishuData);
+
+      addProcessingLog('TOKEN', 'access_token刷新成功', {
+        external_userid,
+        new_expire_time: new Date(tokenExpireTime).toISOString()
+      });
+
+      return { success: true, access_token: newAccessToken };
+    } else {
+      // 刷新失败，需要重新认证
+      addProcessingLog('TOKEN', 'refresh_token刷新失败', {
+        external_userid,
+        error_code: refreshData.code,
+        error_msg: refreshData.msg
+      });
+
+      return { success: false, needReauth: true, reason: `Refresh token失效: ${refreshData.msg}` };
+    }
+
+  } catch (error) {
+    addProcessingLog('ERROR', 'token刷新过程出错', {
+      external_userid,
+      error: error.message
+    });
+    return { success: false, needReauth: true, reason: `刷新过程出错: ${error.message}` };
   }
 }
 
