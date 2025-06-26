@@ -266,6 +266,84 @@ class SupabaseStore {
       return { success: false, error: err.message };
     }
   }
+
+  // ===== 消息去重功能 =====
+  
+  // 保存已处理的消息ID
+  async saveProcessedMessage(messageKey) {
+    try {
+      const { error } = await supabase
+        .from('processed_messages')
+        .upsert({
+          message_key: messageKey,
+          processed_at: new Date().toISOString()
+        }, {
+          onConflict: 'message_key'
+        });
+
+      if (error) {
+        console.error('❌ 保存已处理消息失败:', error);
+        return { success: false, error: error.message };
+      }
+
+      return { success: true };
+
+    } catch (err) {
+      console.error('❌ 保存已处理消息异常:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // 获取所有已处理的消息ID（启动时加载）
+  async getProcessedMessages(limit = 1000) {
+    try {
+      // 只获取最近的记录，避免内存占用过大
+      const { data, error } = await supabase
+        .from('processed_messages')
+        .select('message_key')
+        .order('processed_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.error('❌ 获取已处理消息失败:', error);
+        return { success: false, error: error.message };
+      }
+
+      return {
+        success: true,
+        data: data.map(item => item.message_key)
+      };
+
+    } catch (err) {
+      console.error('❌ 获取已处理消息异常:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // 清理过期的已处理消息记录（定期维护）
+  async cleanupProcessedMessages(daysToKeep = 7) {
+    try {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+      const { error } = await supabase
+        .from('processed_messages')
+        .delete()
+        .lt('processed_at', cutoffDate.toISOString());
+
+      if (error) {
+        console.error('❌ 清理已处理消息失败:', error);
+        return { success: false, error: error.message };
+      }
+
+      console.log(`✅ 清理${daysToKeep}天前的已处理消息记录完成`);
+      return { success: true };
+
+    } catch (err) {
+      console.error('❌ 清理已处理消息异常:', err);
+      return { success: false, error: err.message };
+    }
+  }
 }
 
 // 创建全局实例
