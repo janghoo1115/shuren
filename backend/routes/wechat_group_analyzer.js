@@ -357,10 +357,45 @@ function generateMockAnalysis(parsedData) {
 async function processGroupMessage(msg, accessToken) {
   try {
     const external_userid = msg.external_userid;
-    const userContent = msg.text?.content || '';
+    
+    // 根据消息类型获取内容
+    let userContent = '';
+    if (msg.msgtype === 'text' && msg.text?.content) {
+      userContent = msg.text.content;
+    } else if (msg.msgtype === 'merged_msg') {
+      // 对于merged_msg类型，提示用户直接复制文本
+      addGroupAnalysisLog('PROCESS', '检测到转发消息类型', {
+        external_userid,
+        msgtype: msg.msgtype,
+        open_kfid: msg.open_kfid
+      });
+      
+      return `📋 检测到转发消息格式
+
+我发现您发送的是转发的群聊记录。为了更好地分析群消息内容，请：
+
+🔗 **推荐方法**：
+1. 在微信群中选择要分析的聊天记录
+2. 长按选择"复制"（而不是"转发"）
+3. 直接粘贴文本内容发送给我
+
+📱 **具体操作**：
+• 打开微信群聊
+• 长按某条消息，选择"更多"
+• 勾选要分析的消息
+• 点击"复制"（不要选转发）
+• 回到这里粘贴发送
+
+这样我就能看到完整的聊天记录文本，为您提供更精准的分析！
+
+💡 如果您不方便复制，也可以手动输入群聊的主要内容，我会尽力为您分析。`;
+    } else {
+      userContent = '';
+    }
     
     addGroupAnalysisLog('PROCESS', '开始处理群消息分析请求', {
       external_userid,
+      msgtype: msg.msgtype,
       contentLength: userContent.length,
       open_kfid: msg.open_kfid
     });
