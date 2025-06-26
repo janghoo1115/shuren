@@ -37,6 +37,23 @@ let userLastReplyTime = new Map();
 // 改为持久化存储，避免重新部署时重复处理历史消息
 let processedMessages = new Set();
 
+// 系统状态管理
+let isSystemReady = false;
+let processingLock = new Set(); // 正在处理的消息锁
+
+// 新增：系统初始化函数
+async function initializeSystem() {
+  try {
+    console.log('🚀 开始系统初始化...');
+    await loadProcessedMessages();
+    isSystemReady = true;
+    console.log('✅ 系统初始化完成，可以处理消息');
+  } catch (error) {
+    console.error('❌ 系统初始化失败:', error);
+    isSystemReady = false;
+  }
+}
+
 // 新增：从数据库加载已处理的消息ID
 async function loadProcessedMessages() {
   try {
@@ -47,6 +64,7 @@ async function loadProcessedMessages() {
     }
   } catch (error) {
     console.error('❌ 加载已处理消息记录失败:', error);
+    throw error; // 重新抛出错误，让initializeSystem处理
   }
 }
 
@@ -117,12 +135,12 @@ async function getUserState(external_userid) {
   }
 }
 
-// 应用启动时测试Supabase连接和加载已处理消息
+// 应用启动时测试Supabase连接和初始化系统
 supabaseStore.testConnection().then(connected => {
   if (connected) {
     console.log('✅ Supabase数据库连接正常');
-    // 加载已处理的消息记录
-    loadProcessedMessages();
+    // 完整的系统初始化
+    initializeSystem();
   } else {
     console.error('❌ Supabase数据库连接失败，请检查配置');
   }
@@ -1191,6 +1209,16 @@ async function handleKfMessage(token) {
   try {
     addProcessingLog('KF', '开始处理微信客服消息', { token: token.substring(0, 20) + '...' });
     
+    // 检查系统是否已就绪
+    if (!isSystemReady) {
+      addProcessingLog('WARN', '系统尚未完全初始化，跳过消息处理', { 
+        isSystemReady: isSystemReady,
+        processedMessagesCount: processedMessages.size 
+      });
+      console.log('⚠️ 系统尚未完全初始化，跳过消息处理');
+      return;
+    }
+    
     // 获取access_token
     const tokenResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${WECHAT_CONFIG.corpId}&corpsecret=${WECHAT_CONFIG.corpSecret}`);
     const tokenData = await tokenResponse.json();
@@ -1342,6 +1370,18 @@ async function handleKfMessage(token) {
               continue;
             }
             
+            // 检查消息处理锁（防止并发处理同一消息）
+            const processingKey = latestMsg.msgid;
+            if (processingLock.has(processingKey)) {
+              addProcessingLog('WARN', '消息正在处理中，跳过重复处理', {
+                kf_name: kfAccount.name,
+                open_kfid: open_kfid,
+                msgid: latestMsg.msgid,
+                external_userid: latestMsg.external_userid
+              });
+              continue;
+            }
+            
             // 检查消息是否已经处理过
             const messageKey = `${latestMsg.msgid}_${latestMsg.external_userid}`;
             if (processedMessages.has(messageKey)) {
@@ -1353,6 +1393,9 @@ async function handleKfMessage(token) {
               });
               continue;
             }
+            
+            // 加锁，防止并发处理
+            processingLock.add(processingKey);
             
             // 标记消息为已处理（持久化存储）
             await saveProcessedMessage(messageKey);
@@ -1370,7 +1413,16 @@ async function handleKfMessage(token) {
               content_preview: latestMsg.text ? latestMsg.text.content.substring(0, 50) + '...' : '非文本'
             });
             
-            await processKfUserMessage(latestMsg, tokenData.access_token);
+            try {
+              await processKfUserMessage(latestMsg, tokenData.access_token);
+            } finally {
+              // 处理完成后释放锁
+              processingLock.delete(processingKey);
+              addProcessingLog('KF', '消息处理完成，释放处理锁', {
+                kf_name: kfAccount.name,
+                msgid: latestMsg.msgid
+              });
+            }
           }
         }
         
