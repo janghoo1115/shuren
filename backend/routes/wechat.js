@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const WeChatCrypto = require('../utils/wechat-crypto');
 
+// ===== 引入群消息分析模块 =====
+const groupAnalyzer = require('./wechat_group_analyzer');
+
 // 企业微信配置
 const WECHAT_CONFIG = {
   token: process.env.WECHAT_TOKEN,
@@ -1274,6 +1277,42 @@ async function processKfUserMessage(msg, accessToken) {
       console.log('非文本消息，跳过处理');
       return;
     }
+
+    // ===== 群消息分析路由判断 =====
+    // 如果是群消息分析客服，交给专门的模块处理
+    const GROUP_ANALYZER_KFID = process.env.GROUP_ANALYZER_KFID || 'kfcd06249ea89ab96cd';
+    if (msg.open_kfid === GROUP_ANALYZER_KFID) {
+      console.log('检测到群消息分析客服，转发到群消息分析模块');
+      const analysisResult = await groupAnalyzer.processGroupMessage(msg, accessToken);
+      
+      // 发送群消息分析结果
+      const replyData = {
+        touser: msg.external_userid,
+        open_kfid: msg.open_kfid,
+        msgtype: 'text',
+        text: {
+          content: analysisResult
+        }
+      };
+      
+      const replyResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${accessToken}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(replyData)
+      });
+      
+      const replyResult = await replyResponse.json();
+      if (replyResult.errcode === 0) {
+        console.log('群消息分析结果发送成功');
+      } else {
+        console.error('群消息分析结果发送失败:', replyResult);
+      }
+      
+      return; // 群消息分析处理完成，直接返回
+    }
+    // ===== 群消息分析路由判断结束 =====
 
     const userContent = msg.text.content;
     const external_userid = msg.external_userid;
