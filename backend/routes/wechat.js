@@ -452,7 +452,7 @@ async function sendConfirmationMessage(external_userid) {
     }
     
     // 查找随心记客服账号
-    const targetKfId = process.env.WECHAT_KFID || 'kfca677d36885794305';
+    const targetKfId = process.env.WECHAT_KFID || 'wkBoQTSQAAeQkgQfmbEifYJsuk7hEG3A';
     let open_kfid = null;
     
     // 寻找指定的客服账号
@@ -1364,7 +1364,7 @@ async function processKfUserMessage(msg, accessToken) {
 
     // ===== 群消息分析路由判断 =====
     // 如果是群消息分析客服，交给专门的模块处理
-    const GROUP_ANALYZER_KFID = process.env.GROUP_ANALYZER_KFID || 'kfcd06249ea89ab96cd';
+    const GROUP_ANALYZER_KFID = process.env.GROUP_ANALYZER_KFID || 'wkBoQTSQAA6ZOXnTznX4IiBz4bIIgr_Q';
     if (msg.open_kfid === GROUP_ANALYZER_KFID) {
       console.log('检测到群消息分析客服，转发到群消息分析模块');
       const analysisResult = await groupAnalyzer.processGroupMessage(msg, accessToken);
