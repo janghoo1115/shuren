@@ -1391,6 +1391,22 @@ async function processKfUserMessage(msg, accessToken) {
         return;
       }
       console.log('检测到群消息分析客服，转发到群消息分析模块');
+      
+      // 添加详细的消息结构调试日志
+      if (msg.msgtype === 'merged_msg') {
+        console.log('=== MERGED_MSG 详细结构调试 ===');
+        console.log('完整消息对象:', JSON.stringify(msg, null, 2));
+        groupAnalyzer.addGroupAnalysisLog('DEBUG', 'merged_msg消息结构', {
+          msgtype: msg.msgtype,
+          msgid: msg.msgid,
+          all_fields: Object.keys(msg),
+          msg_content: msg.content,
+          has_merged_msg_field: !!msg.merged_msg,
+          merged_msg_structure: msg.merged_msg ? Object.keys(msg.merged_msg) : null,
+          full_msg: msg
+        });
+      }
+      
       const analysisResult = await groupAnalyzer.processGroupMessage(msg, accessToken);
       
       // 发送群消息分析结果
