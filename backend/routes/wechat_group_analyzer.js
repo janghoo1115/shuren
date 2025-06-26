@@ -363,16 +363,49 @@ async function processGroupMessage(msg, accessToken) {
     if (msg.msgtype === 'text' && msg.text?.content) {
       userContent = msg.text.content;
     } else if (msg.msgtype === 'merged_msg') {
-      // 对于merged_msg类型，提示用户直接复制文本
-      addGroupAnalysisLog('PROCESS', '检测到转发消息类型', {
+      // 尝试从不同字段获取merged_msg的内容
+      addGroupAnalysisLog('PROCESS', '检测到转发消息类型，尝试解析内容', {
         external_userid,
         msgtype: msg.msgtype,
-        open_kfid: msg.open_kfid
+        open_kfid: msg.open_kfid,
+        msg_structure: Object.keys(msg)
       });
       
-      return `📋 检测到转发消息格式
+      // 尝试从可能的字段获取内容
+      if (msg.merged_msg?.content) {
+        userContent = msg.merged_msg.content;
+        addGroupAnalysisLog('PROCESS', '从merged_msg.content获取到内容', {
+          contentLength: userContent.length
+        });
+      } else if (msg.merged_msg?.item_list) {
+        // 如果是消息列表，尝试拼接所有消息
+        const messageList = msg.merged_msg.item_list;
+        userContent = messageList.map(item => {
+          if (item.type === 'text' && item.content) {
+            return `${item.from_name || '未知用户'}: ${item.content}`;
+          }
+          return '';
+        }).filter(Boolean).join('\n');
+        
+        addGroupAnalysisLog('PROCESS', '从merged_msg.item_list解析消息', {
+          itemCount: messageList.length,
+          contentLength: userContent.length
+        });
+      } else if (msg.content && msg.content !== '非文本消息') {
+        userContent = msg.content;
+        addGroupAnalysisLog('PROCESS', '从msg.content获取到内容', {
+          contentLength: userContent.length
+        });
+      } else {
+        // 如果仍然无法获取内容，提供指导
+        addGroupAnalysisLog('WARN', '无法解析merged_msg内容，提供使用指导', {
+          available_fields: Object.keys(msg),
+          merged_msg_fields: msg.merged_msg ? Object.keys(msg.merged_msg) : null
+        });
+        
+        return `📋 检测到转发消息格式
 
-我发现您发送的是转发的群聊记录。为了更好地分析群消息内容，请：
+我发现您发送的是转发的群聊记录，但当前无法直接解析其内容。为了更好地分析群消息，请：
 
 🔗 **推荐方法**：
 1. 在微信群中选择要分析的聊天记录
@@ -389,6 +422,7 @@ async function processGroupMessage(msg, accessToken) {
 这样我就能看到完整的聊天记录文本，为您提供更精准的分析！
 
 💡 如果您不方便复制，也可以手动输入群聊的主要内容，我会尽力为您分析。`;
+      }
     } else {
       userContent = '';
     }
