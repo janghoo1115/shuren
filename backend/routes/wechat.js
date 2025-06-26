@@ -34,7 +34,33 @@ let processingLogs = [];
 let userLastReplyTime = new Map();
 
 // 存储已处理的消息ID（防止重复处理）
+// 改为持久化存储，避免重新部署时重复处理历史消息
 let processedMessages = new Set();
+
+// 新增：从数据库加载已处理的消息ID
+async function loadProcessedMessages() {
+  try {
+    const result = await supabaseStore.getProcessedMessages();
+    if (result.success && result.data) {
+      result.data.forEach(msgKey => processedMessages.add(msgKey));
+      console.log(`✅ 加载已处理消息记录: ${processedMessages.size} 条`);
+    }
+  } catch (error) {
+    console.error('❌ 加载已处理消息记录失败:', error);
+  }
+}
+
+// 新增：保存已处理的消息ID到数据库
+async function saveProcessedMessage(messageKey) {
+  try {
+    processedMessages.add(messageKey);
+    await supabaseStore.saveProcessedMessage(messageKey);
+  } catch (error) {
+    console.error('❌ 保存已处理消息记录失败:', error);
+    // 即使保存失败，也要添加到内存中，避免重复处理
+    processedMessages.add(messageKey);
+  }
+}
 
 // ===== 新增：用户状态管理 =====
 const USER_STATES = {
@@ -91,10 +117,12 @@ async function getUserState(external_userid) {
   }
 }
 
-// 应用启动时测试Supabase连接
+// 应用启动时测试Supabase连接和加载已处理消息
 supabaseStore.testConnection().then(connected => {
   if (connected) {
     console.log('✅ Supabase数据库连接正常');
+    // 加载已处理的消息记录
+    loadProcessedMessages();
   } else {
     console.error('❌ Supabase数据库连接失败，请检查配置');
   }
@@ -1326,8 +1354,8 @@ async function handleKfMessage(token) {
               continue;
             }
             
-            // 标记消息为已处理
-            processedMessages.add(messageKey);
+            // 标记消息为已处理（持久化存储）
+            await saveProcessedMessage(messageKey);
             
             // 清理旧的消息ID（保留最近100条）
             if (processedMessages.size > 100) {
