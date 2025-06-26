@@ -549,43 +549,81 @@ router.all('/feishu-auth', async (req, res) => {
     // 获取用户信息
     const userInfo = await getFeishuUserInfo(accessToken);
     
-    // 创建主文档
-    const createResult = await createMainFeishuDocument(accessToken, userInfo.name || '用户');
+    let documentId = null;
+    let documentUrl = null;
     
-    if (!createResult.success) {
-      return res.status(500).json({
-        error: '创建文档失败',
-        details: createResult.error
-      });
-    }
-    
-      // 如果有external_userid，更新用户状态
-  if (external_userid) {
-    await updateUserState(external_userid, USER_STATES.INITIALIZED, {
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      token_expire_time: tokenExpireTime,
-      main_document_id: createResult.documentId,
-      user_name: userInfo.name || '用户'
-    });
-    
-    addProcessingLog('FEISHU_AUTH', '飞书认证完成并更新用户状态', {
-      external_userid,
-      user_name: userInfo.name,
-      main_document_id: createResult.documentId,
-      token_expire_time: new Date(tokenExpireTime).toISOString(),
-      has_refresh_token: !!refreshToken
-    });
-    
-    // 异步发送确认消息
-    setTimeout(async () => {
-      try {
-        await sendConfirmationMessage(external_userid);
-      } catch (error) {
-        console.error('发送确认消息失败:', error);
+    // 如果有external_userid，检查用户是否已存在
+    if (external_userid) {
+      const existingUser = await getUserState(external_userid);
+      
+      if (existingUser.state !== USER_STATES.UNAUTH && existingUser.feishuData?.main_document_id) {
+        // 用户已认证过，复用原有文档
+        documentId = existingUser.feishuData.main_document_id;
+        documentUrl = `https://bytedance.feishu.cn/docx/${documentId}`;
+        
+        addProcessingLog('FEISHU_AUTH', '用户重新认证，复用原有文档', {
+          external_userid,
+          existing_document_id: documentId
+        });
+      } else {
+        // 新用户，创建新文档
+        const createResult = await createMainFeishuDocument(accessToken, userInfo.name || '用户');
+        
+        if (!createResult.success) {
+          return res.status(500).json({
+            error: '创建文档失败',
+            details: createResult.error
+          });
+        }
+        
+        documentId = createResult.documentId;
+        documentUrl = createResult.url;
+        
+        addProcessingLog('FEISHU_AUTH', '新用户认证，创建新文档', {
+          external_userid,
+          new_document_id: documentId
+        });
       }
-    }, 1000);
-  }
+      
+      // 更新用户状态
+      await updateUserState(external_userid, USER_STATES.INITIALIZED, {
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_expire_time: tokenExpireTime,
+        main_document_id: documentId,
+        user_name: userInfo.name || '用户'
+        });
+      
+      addProcessingLog('FEISHU_AUTH', '飞书认证完成并更新用户状态', {
+        external_userid,
+        user_name: userInfo.name,
+        main_document_id: documentId,
+        token_expire_time: new Date(tokenExpireTime).toISOString(),
+        has_refresh_token: !!refreshToken
+      });
+      
+      // 异步发送确认消息
+      setTimeout(async () => {
+        try {
+          await sendConfirmationMessage(external_userid);
+        } catch (error) {
+          console.error('发送确认消息失败:', error);
+        }
+      }, 1000);
+    } else {
+      // 没有external_userid的情况（应该不会发生，但做兜底处理）
+      const createResult = await createMainFeishuDocument(accessToken, userInfo.name || '用户');
+      
+      if (!createResult.success) {
+        return res.status(500).json({
+          error: '创建文档失败',
+          details: createResult.error
+        });
+      }
+      
+      documentId = createResult.documentId;
+      documentUrl = createResult.url;
+    }
     
     // 返回成功页面HTML
     const successHtml = `
@@ -661,7 +699,7 @@ router.all('/feishu-auth', async (req, res) => {
             
             <p>您的微信随心记已经设置完成！现在可以回到微信开始使用了。</p>
             
-            <a href="${createResult.url}" class="btn" target="_blank">📖 查看微信随心记</a>
+            <a href="${documentUrl}" class="btn" target="_blank">📖 查看微信随心记</a>
         </div>
     </body>
     </html>
