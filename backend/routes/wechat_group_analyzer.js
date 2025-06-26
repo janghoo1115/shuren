@@ -377,20 +377,29 @@ async function processGroupMessage(msg, accessToken) {
         addGroupAnalysisLog('PROCESS', '从merged_msg.content获取到内容', {
           contentLength: userContent.length
         });
-      } else if (msg.merged_msg?.item_list) {
-        // 如果是消息列表，尝试拼接所有消息
-        const messageList = msg.merged_msg.item_list;
-        userContent = messageList.map(item => {
-          if (item.type === 'text' && item.content) {
-            return `${item.from_name || '未知用户'}: ${item.content}`;
-          }
-          return '';
-        }).filter(Boolean).join('\n');
-        
-        addGroupAnalysisLog('PROCESS', '从merged_msg.item_list解析消息', {
-          itemCount: messageList.length,
-          contentLength: userContent.length
-        });
+             } else if (msg.merged_msg?.item) {
+         // 如果是消息列表，尝试拼接所有消息
+         const messageList = msg.merged_msg.item;
+         userContent = messageList.map(item => {
+           if (item.msgtype === 'text' && item.msg_content) {
+             try {
+               // msg_content是JSON字符串，需要解析
+               const contentObj = JSON.parse(item.msg_content);
+               const content = contentObj.text?.content || item.msg_content;
+               return `${item.sender_name || '未知用户'}: ${content}`;
+             } catch (e) {
+               // 如果解析失败，直接使用原始内容
+               return `${item.sender_name || '未知用户'}: ${item.msg_content}`;
+             }
+           }
+           return '';
+         }).filter(Boolean).join('\n');
+         
+         addGroupAnalysisLog('PROCESS', '从merged_msg.item解析消息', {
+           itemCount: messageList.length,
+           contentLength: userContent.length,
+           sample_item: messageList[0]
+         });
       } else if (msg.content && msg.content !== '非文本消息') {
         userContent = msg.content;
         addGroupAnalysisLog('PROCESS', '从msg.content获取到内容', {
