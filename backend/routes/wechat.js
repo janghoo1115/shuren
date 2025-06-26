@@ -497,15 +497,32 @@ async function sendConfirmationMessage(external_userid) {
 router.all('/feishu-auth', async (req, res) => {
   try {
     const { code, error, state } = req.query;
+    const requestId = Math.random().toString(36).substring(2, 15);
     
-    console.log('飞书OAuth回调:', { code: code ? code.substring(0, 10) + '...' : null, error, state });
+    addProcessingLog('FEISHU_AUTH', 'OAuth回调开始处理', { 
+      requestId,
+      hasCode: !!code, 
+      hasError: !!error, 
+      hasState: !!state,
+      userAgent: req.headers['user-agent']
+    });
+    
+    console.log(`[${requestId}] 飞书OAuth回调:`, { 
+      code: code ? code.substring(0, 10) + '...' : null, 
+      error, 
+      state,
+      method: req.method,
+      ip: req.ip
+    });
     
     // 处理错误情况
     if (error) {
+      addProcessingLog('FEISHU_AUTH', 'OAuth认证失败', { requestId, error });
       return res.status(400).json({ error: '授权失败', details: error });
     }
     
     if (!code) {
+      addProcessingLog('FEISHU_AUTH', '缺少授权码', { requestId });
       return res.status(400).json({ error: '缺少授权码' });
     }
     
@@ -517,6 +534,12 @@ router.all('/feishu-auth', async (req, res) => {
         external_userid = match[1];
       }
     }
+    
+    addProcessingLog('FEISHU_AUTH', '开始获取访问令牌', { 
+      requestId, 
+      external_userid,
+      codePrefix: code.substring(0, 10)
+    });
     
     // 获取访问令牌
     const tokenResponse = await fetch('https://open.feishu.cn/open-apis/authen/v1/access_token', {
@@ -532,7 +555,43 @@ router.all('/feishu-auth', async (req, res) => {
     
     const tokenData = await tokenResponse.json();
     
+    addProcessingLog('FEISHU_AUTH', '访问令牌API响应', { 
+      requestId, 
+      responseCode: tokenData.code,
+      hasAccessToken: !!tokenData.data?.access_token,
+      errorMsg: tokenData.msg
+    });
+    
     if (tokenData.code !== 0) {
+      // 特殊处理授权码已使用的情况
+      if (tokenData.msg && tokenData.msg.includes('code has been used')) {
+        addProcessingLog('FEISHU_AUTH', '授权码已被使用，可能是重复请求', { 
+          requestId, 
+          external_userid,
+          errorMsg: tokenData.msg 
+        });
+        
+        // 检查用户是否已经完成认证
+        if (external_userid) {
+          const existingUser = await getUserState(external_userid);
+          if (existingUser.state === USER_STATES.INITIALIZED && existingUser.feishuData?.access_token) {
+            addProcessingLog('FEISHU_AUTH', '用户已完成认证，直接返回成功页面', { 
+              requestId, 
+              external_userid 
+            });
+            
+            // 返回成功页面，表示认证已完成
+            return res.send(generateSuccessPage(existingUser.feishuData.user_name, existingUser.feishuData.main_document_id));
+          }
+        }
+        
+        return res.status(400).json({
+          error: '授权码已使用',
+          details: '此授权码已被使用，如果您是首次认证，说明认证可能已成功。请关闭此页面并在微信中测试功能。',
+          suggestion: '请重新获取认证链接或直接在微信中测试功能是否正常。'
+        });
+      }
+      
       return res.status(400).json({
         error: '获取访问令牌失败',
         details: tokenData.msg
@@ -2564,6 +2623,90 @@ async function checkOrCreateFeishuDocument(accessToken, feishuData, external_use
     });
     return { success: false, error: error.message };
   }
+}
+
+// 生成成功页面HTML
+function generateSuccessPage(userName, documentId) {
+  const documentUrl = `https://bytedance.feishu.cn/docx/${documentId}`;
+  
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>微信随心记 - 设置成功</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+                max-width: 600px;
+                margin: 50px auto;
+                padding: 20px;
+                background-color: #f5f5f5;
+                line-height: 1.6;
+            }
+            .container {
+                background: white;
+                padding: 40px;
+                border-radius: 12px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+                text-align: center;
+            }
+            .success-icon { font-size: 64px; margin-bottom: 20px; }
+            h1 { color: #2e7d32; margin-bottom: 20px; }
+            .user-info {
+                background: #e8f5e8;
+                padding: 20px;
+                border-radius: 8px;
+                margin: 20px 0;
+            }
+            .instructions {
+                background: #fff3cd;
+                border: 1px solid #ffeaa7;
+                color: #856404;
+                padding: 20px;
+                border-radius: 8px;
+                margin: 20px 0;
+                text-align: left;
+            }
+            .btn {
+                display: inline-block;
+                background-color: #00B96B;
+                color: white;
+                padding: 12px 24px;
+                text-decoration: none;
+                border-radius: 6px;
+                margin: 10px;
+                font-weight: 500;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="success-icon">🎉</div>
+            <h1>微信随心记设置成功！</h1>
+            
+            <div class="user-info">
+                <strong>👤 用户信息</strong><br>
+                姓名: ${userName || '用户'}<br>
+                设置完成时间: ${new Date().toLocaleString('zh-CN')}
+            </div>
+            
+            <div class="instructions">
+                <strong>📱 使用说明：</strong><br>
+                1. 现在您可以在微信中向客服发送任何内容<br>
+                2. 客服会自动将您的内容通过AI整理后记录到飞书文档<br>
+                3. 所有内容都会保存在您的"微信随心记"文档中<br>
+                4. 您可以随时在飞书中查看和编辑这些记录
+            </div>
+            
+            <p>您的微信随心记已经设置完成！现在可以回到微信开始使用了。</p>
+            
+            <a href="${documentUrl}" class="btn" target="_blank">📖 查看微信随心记</a>
+        </div>
+    </body>
+    </html>
+  `;
 }
 
 module.exports = router; 
