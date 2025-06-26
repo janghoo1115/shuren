@@ -9,7 +9,7 @@ const DOUBAO_CONFIG = {
 
 // ===== 群消息分析配置 =====
 const GROUP_ANALYZER_CONFIG = {
-  kfid: process.env.GROUP_ANALYZER_KFID || 'kfcd06249ea89ab96cd',
+  kfid: process.env.GROUP_ANALYZER_KFID || 'wkBoQTSQAA6ZOXnTznX4IiBz4bIIgr_Q',
   max_content_length: parseInt(process.env.MAX_GROUP_CONTENT_LENGTH) || 5000,
   enable_analysis_history: process.env.ENABLE_ANALYSIS_HISTORY === 'true'
 };
