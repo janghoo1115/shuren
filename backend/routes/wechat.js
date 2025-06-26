@@ -108,6 +108,146 @@ function cleanupExpiredLocks() {
 // 定期清理过期锁（每5分钟执行一次）
 setInterval(cleanupExpiredLocks, 5 * 60 * 1000);
 
+// 新增：统一的消息内容提取函数（参考群消息客服的处理方式）
+function extractMessageContent(msg) {
+  if (msg.msgtype === 'text') {
+    return {
+      content: msg.text.content,
+      type: 'text',
+      source: '用户直接输入',
+      success: true
+    };
+  } else if (msg.msgtype === 'merged_msg') {
+    addProcessingLog('KF', '检测到转发消息，开始解析', {
+      msgtype: msg.msgtype,
+      msg_structure: Object.keys(msg),
+      merged_msg_fields: msg.merged_msg ? Object.keys(msg.merged_msg) : null
+    });
+    
+    let userContent = '';
+    let parseMethod = '';
+    
+    try {
+      // 方法1: 尝试从merged_msg.content获取（如果存在）
+      if (msg.merged_msg?.content) {
+        userContent = msg.merged_msg.content;
+        parseMethod = 'merged_msg.content';
+        
+        addProcessingLog('KF', '从merged_msg.content获取到内容', {
+          contentLength: userContent.length
+        });
+        
+      } else if (msg.merged_msg?.item && Array.isArray(msg.merged_msg.item)) {
+        // 方法2: 从merged_msg.item解析消息列表
+        const messageList = msg.merged_msg.item;
+        const extractedMessages = messageList.map((item, index) => {
+          if (item.msgtype === 'text' && item.msg_content) {
+            try {
+              // msg_content是JSON字符串，需要解析
+              const contentObj = JSON.parse(item.msg_content);
+              const content = contentObj.text?.content || item.msg_content;
+              const senderName = item.sender_name || `用户${index + 1}`;
+              return `${senderName}: ${content}`;
+            } catch (e) {
+              // 如果解析失败，直接使用原始内容
+              const senderName = item.sender_name || `用户${index + 1}`;
+              return `${senderName}: ${item.msg_content}`;
+            }
+          }
+          return '';
+        }).filter(Boolean);
+        
+        userContent = extractedMessages.join('\n');
+        parseMethod = 'merged_msg.item';
+        
+        addProcessingLog('KF', '从merged_msg.item解析消息', {
+          itemCount: messageList.length,
+          extractedCount: extractedMessages.length,
+          contentLength: userContent.length,
+          sample_item: messageList[0]
+        });
+        
+      } else if (msg.content && msg.content !== '非文本消息') {
+        // 方法3: 从msg.content获取
+        userContent = msg.content;
+        parseMethod = 'msg.content';
+        
+        addProcessingLog('KF', '从msg.content获取到内容', {
+          contentLength: userContent.length
+        });
+        
+      } else {
+        // 无法解析的情况
+        addProcessingLog('WARN', '无法解析merged_msg内容', {
+          available_fields: Object.keys(msg),
+          merged_msg_fields: msg.merged_msg ? Object.keys(msg.merged_msg) : null
+        });
+        
+        return {
+          content: `📋 检测到转发消息但无法解析
+
+抱歉，我无法直接解析这个转发消息的内容。为了更好地记录，请：
+
+🔗 **推荐方法**：
+1. 在微信中选择要记录的聊天内容
+2. 长按选择"复制"（而不是"转发"）  
+3. 直接粘贴文本内容发送给我
+
+📱 **具体操作**：
+• 长按消息选择"更多"
+• 勾选要记录的消息
+• 点击"复制"（不要选转发）
+• 回到这里粘贴发送
+
+这样我就能完整记录到您的飞书文档中！
+
+💡 您也可以直接输入想要记录的内容。`,
+          type: 'merged_msg',
+          source: '转发消息(无法解析)',
+          success: false
+        };
+      }
+      
+      // 检查是否成功获取到内容
+      if (!userContent || userContent.trim().length === 0) {
+        return {
+          content: '[转发消息为空]',
+          type: 'merged_msg', 
+          source: '转发消息(空内容)',
+          success: false
+        };
+      }
+      
+      return {
+        content: userContent,
+        type: 'merged_msg',
+        source: `转发消息(${parseMethod})`,
+        success: true
+      };
+      
+    } catch (error) {
+      addProcessingLog('ERROR', '解析merged_msg异常', {
+        error: error.message,
+        stack: error.stack
+      });
+      
+      return {
+        content: '[转发消息解析失败]',
+        type: 'merged_msg',
+        source: '转发消息(解析异常)',
+        success: false
+      };
+    }
+  }
+  
+  return {
+    content: '[不支持的消息类型]',
+    type: msg.msgtype,
+    source: '未知',
+    success: false
+  };
+}
+
 // ===== 新增：用户状态管理 =====
 const USER_STATES = {
   UNAUTH: 'unauth',           // 未认证
@@ -1439,7 +1579,10 @@ async function handleKfMessage(token) {
               kf_name: kfAccount.name,
               open_kfid: open_kfid,
               msgid: latestMsg.msgid,
-              content_preview: latestMsg.text ? latestMsg.text.content.substring(0, 50) + '...' : '非文本'
+              msgtype: latestMsg.msgtype,
+              content_preview: latestMsg.msgtype === 'text' ? 
+                (latestMsg.text.content.substring(0, 50) + (latestMsg.text.content.length > 50 ? '...' : '')) :
+                (latestMsg.msgtype === 'merged_msg' ? '转发消息' : '非文本')
             });
             
             try {
@@ -1559,16 +1702,50 @@ async function processKfUserMessage(msg, accessToken) {
     }
     // ===== 群消息分析路由判断结束 =====
 
-    // 随心记客服只处理text类型消息
-    if (msg.msgtype !== 'text') {
-      console.log('随心记：非文本消息，跳过处理');
+    // 随心记客服支持text和merged_msg类型消息
+    if (msg.msgtype !== 'text' && msg.msgtype !== 'merged_msg') {
+      console.log('随心记：不支持的消息类型，跳过处理');
       return;
     }
 
-    const userContent = msg.text.content;
+    // 使用统一的内容提取函数
+    const extractedData = extractMessageContent(msg);
+    const userContent = extractedData.content;
     const external_userid = msg.external_userid;
     
+    console.log('消息类型:', extractedData.type);
+    console.log('消息来源:', extractedData.source);
+    console.log('解析成功:', extractedData.success);
     console.log('消息内容:', userContent);
+    
+    // 如果是merged_msg但解析失败，直接回复用户指导信息
+    if (extractedData.type === 'merged_msg' && !extractedData.success) {
+      const replyData = {
+        touser: external_userid,
+        open_kfid: msg.open_kfid,
+        msgtype: 'text',
+        text: {
+          content: userContent // 这里的content是指导信息
+        }
+      };
+      
+      const replyResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${accessToken}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(replyData)
+      });
+      
+      const replyResult = await replyResponse.json();
+      addProcessingLog('KF', '转发消息解析失败，已发送指导信息', {
+        external_userid,
+        success: replyResult.errcode === 0,
+        source: extractedData.source
+      });
+      
+      return; // 结束处理
+    }
     
     // 检查用户状态
     // 从Supabase获取当前用户状态
@@ -1577,7 +1754,9 @@ async function processKfUserMessage(msg, accessToken) {
     addProcessingLog('KF', '用户当前状态', {
       external_userid,
       state: currentState,
-      content: userContent
+      msgtype: extractedData.type,
+      source: extractedData.source,
+      content_preview: userContent.substring(0, 100) + (userContent.length > 100 ? '...' : '')
     });
     
     // 防止频繁回复检查（基于消息ID的更精确控制）
@@ -1684,10 +1863,18 @@ async function processKfUserMessage(msg, accessToken) {
           // 3. 调用豆包AI生成概括
           addProcessingLog('KF', '开始AI处理用户内容', {
             external_userid,
-            content_length: userContent.length
+            content_length: userContent.length,
+            msgtype: extractedData.type,
+            source: extractedData.source
           });
           
-          const aiResult = await callDoubaoAPI(userContent);
+          // 根据消息类型调整AI提示
+          let aiPrompt = userContent;
+          if (extractedData.type === 'merged_msg') {
+            aiPrompt = `这是用户转发的聊天记录，请用20字以内概括主要讨论内容：\n\n${userContent}`;
+          }
+          
+          const aiResult = await callDoubaoAPI(aiPrompt);
           const aiSummary = aiResult.content;
           
           addProcessingLog('KF', 'AI处理完成', {
@@ -1709,15 +1896,28 @@ async function processKfUserMessage(msg, accessToken) {
           );
           
           if (updateResult.success) {
-            replyContent = '✅ 已记录！内容已保存到你的飞书文档中。';
+            // 根据消息类型提供不同的反馈
+            if (extractedData.type === 'merged_msg') {
+              const messageCount = extractedData.source.includes('merged_msg.item') ? 
+                (userContent.split('\n').filter(line => line.includes(':')).length) : '转发';
+              replyContent = `✅ 转发消息已记录！已成功解析并保存到你的飞书文档中。
+
+📋 解析方式：${extractedData.source}
+${typeof messageCount === 'number' ? `📊 包含 ${messageCount} 条消息` : ''}`;
+            } else {
+              replyContent = '✅ 已记录！内容已保存到你的飞书文档中。';
+            }
+            
             addProcessingLog('KF', '飞书文档更新成功', {
               external_userid,
+              msgtype: extractedData.type,
               ai_summary: aiSummary
             });
           } else {
             replyContent = '❌ 记录失败，请稍后重试。';
             addProcessingLog('ERROR', '飞书文档更新失败', {
               external_userid,
+              msgtype: extractedData.type,
               error: updateResult.error
             });
           }
