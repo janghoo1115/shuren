@@ -40,6 +40,7 @@ let processedMessages = new Set();
 // 系统状态管理
 let isSystemReady = false;
 let processingLock = new Set(); // 正在处理的消息锁
+let processingLockTimestamps = new Map(); // 处理锁的时间戳，用于超时清理
 
 // 新增：系统初始化函数
 async function initializeSystem() {
@@ -51,6 +52,12 @@ async function initializeSystem() {
   } catch (error) {
     console.error('❌ 系统初始化失败:', error);
     isSystemReady = false;
+    
+    // 5秒后重试初始化
+    setTimeout(async () => {
+      console.log('🔄 尝试重新初始化系统...');
+      await initializeSystem();
+    }, 5000);
   }
 }
 
@@ -79,6 +86,27 @@ async function saveProcessedMessage(messageKey) {
     processedMessages.add(messageKey);
   }
 }
+
+// 新增：清理过期的处理锁（防止锁泄漏）
+function cleanupExpiredLocks() {
+  const now = Date.now();
+  const LOCK_TIMEOUT = 5 * 60 * 1000; // 5分钟超时
+  
+  for (const [lockKey, timestamp] of processingLockTimestamps.entries()) {
+    if (now - timestamp > LOCK_TIMEOUT) {
+      processingLock.delete(lockKey);
+      processingLockTimestamps.delete(lockKey);
+      console.log(`⚠️ 清理过期处理锁: ${lockKey}`);
+      addProcessingLog('WARN', '清理过期处理锁', { 
+        lockKey, 
+        ageMinutes: Math.round((now - timestamp) / 60000) 
+      });
+    }
+  }
+}
+
+// 定期清理过期锁（每5分钟执行一次）
+setInterval(cleanupExpiredLocks, 5 * 60 * 1000);
 
 // ===== 新增：用户状态管理 =====
 const USER_STATES = {
@@ -1396,6 +1424,7 @@ async function handleKfMessage(token) {
             
             // 加锁，防止并发处理
             processingLock.add(processingKey);
+            processingLockTimestamps.set(processingKey, Date.now());
             
             // 标记消息为已处理（持久化存储）
             await saveProcessedMessage(messageKey);
@@ -1418,6 +1447,7 @@ async function handleKfMessage(token) {
             } finally {
               // 处理完成后释放锁
               processingLock.delete(processingKey);
+              processingLockTimestamps.delete(processingKey);
               addProcessingLog('KF', '消息处理完成，释放处理锁', {
                 kf_name: kfAccount.name,
                 msgid: latestMsg.msgid
@@ -2252,6 +2282,23 @@ router.get('/debug/clear-reply-limits', (req, res) => {
     message: '已清除所有用户回复时间限制',
     cleared_users: beforeCount,
     timestamp: new Date().toISOString()
+  });
+});
+
+// 新增：系统健康检查接口
+router.get('/debug/system-health', (req, res) => {
+  res.json({
+    system_ready: isSystemReady,
+    processed_messages_count: processedMessages.size,
+    active_processing_locks: processingLock.size,
+    lock_details: Array.from(processingLockTimestamps.entries()).map(([key, timestamp]) => ({
+      lock_key: key,
+      age_seconds: Math.round((Date.now() - timestamp) / 1000)
+    })),
+    uptime_seconds: Math.round(process.uptime()),
+    memory_usage: process.memoryUsage(),
+    timestamp: new Date().toISOString(),
+    status: isSystemReady ? 'healthy' : 'initializing'
   });
 });
 
