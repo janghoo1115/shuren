@@ -1290,6 +1290,30 @@ async function handleKfMessage(token) {
               continue;
             }
             
+            // 额外保护：双重验证客服身份
+            const GROUP_ANALYZER_KFID = process.env.GROUP_ANALYZER_KFID || 'wkBoQTSQAA6ZOXnTznX4IiBz4bIIgr_Q';
+            const RANDOM_NOTE_KFID = process.env.WECHAT_KFID || 'wkBoQTSQAAeQkgQfmbEifYJsuk7hEG3A';
+            
+            // 如果当前是群消息分析客服，确保消息确实来自群消息分析客服
+            if (open_kfid === GROUP_ANALYZER_KFID && latestMsg.open_kfid !== GROUP_ANALYZER_KFID) {
+              addProcessingLog('KF', '群消息分析客服：消息来源不匹配，跳过', {
+                expected_kfid: GROUP_ANALYZER_KFID,
+                message_kfid: latestMsg.open_kfid,
+                msgid: latestMsg.msgid
+              });
+              continue;
+            }
+            
+            // 如果当前是随心记客服，确保消息确实来自随心记客服
+            if (open_kfid === RANDOM_NOTE_KFID && latestMsg.open_kfid !== RANDOM_NOTE_KFID) {
+              addProcessingLog('KF', '随心记客服：消息来源不匹配，跳过', {
+                expected_kfid: RANDOM_NOTE_KFID,
+                message_kfid: latestMsg.open_kfid,
+                msgid: latestMsg.msgid
+              });
+              continue;
+            }
+            
             // 检查消息是否已经处理过
             const messageKey = `${latestMsg.msgid}_${latestMsg.external_userid}`;
             if (processedMessages.has(messageKey)) {
@@ -1357,15 +1381,15 @@ async function processKfUserMessage(msg, accessToken) {
     console.log('客服ID:', msg.open_kfid);
     console.log('用户ID:', msg.external_userid);
     
-    if (msg.msgtype !== 'text') {
-      console.log('非文本消息，跳过处理');
-      return;
-    }
-
     // ===== 群消息分析路由判断 =====
     // 如果是群消息分析客服，交给专门的模块处理
     const GROUP_ANALYZER_KFID = process.env.GROUP_ANALYZER_KFID || 'wkBoQTSQAA6ZOXnTznX4IiBz4bIIgr_Q';
     if (msg.open_kfid === GROUP_ANALYZER_KFID) {
+      // 群消息分析客服支持text和merged_msg类型
+      if (msg.msgtype !== 'text' && msg.msgtype !== 'merged_msg') {
+        console.log('群消息分析：不支持的消息类型，跳过处理');
+        return;
+      }
       console.log('检测到群消息分析客服，转发到群消息分析模块');
       const analysisResult = await groupAnalyzer.processGroupMessage(msg, accessToken);
       
@@ -1390,13 +1414,30 @@ async function processKfUserMessage(msg, accessToken) {
       const replyResult = await replyResponse.json();
       if (replyResult.errcode === 0) {
         console.log('群消息分析结果发送成功');
+        groupAnalyzer.addGroupAnalysisLog('SUCCESS', '群消息分析回复发送成功', {
+          external_userid: msg.external_userid,
+          msgid: msg.msgid,
+          reply_length: analysisResult.length
+        });
       } else {
         console.error('群消息分析结果发送失败:', replyResult);
+        groupAnalyzer.addGroupAnalysisLog('ERROR', '群消息分析回复发送失败', {
+          external_userid: msg.external_userid,
+          msgid: msg.msgid,
+          error_code: replyResult.errcode,
+          error_msg: replyResult.errmsg
+        });
       }
       
       return; // 群消息分析处理完成，直接返回
     }
     // ===== 群消息分析路由判断结束 =====
+
+    // 随心记客服只处理text类型消息
+    if (msg.msgtype !== 'text') {
+      console.log('随心记：非文本消息，跳过处理');
+      return;
+    }
 
     const userContent = msg.text.content;
     const external_userid = msg.external_userid;
