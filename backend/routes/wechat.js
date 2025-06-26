@@ -1902,7 +1902,7 @@ async function processKfUserMessage(msg, accessToken) {
                 (userContent.split('\n').filter(line => line.includes(':')).length) : '转发';
               replyContent = `✅ 转发消息已记录！已成功解析并保存到你的飞书文档中。
 
-📋 解析方式：${extractedData.source}
+
 ${typeof messageCount === 'number' ? `📊 包含 ${messageCount} 条消息` : ''}`;
             } else {
               replyContent = '✅ 已记录！内容已保存到你的飞书文档中。';
