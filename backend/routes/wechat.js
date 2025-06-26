@@ -1170,81 +1170,98 @@ async function handleKfMessage(token) {
       throw new Error('没有可用的客服账号');
     }
     
-    // 使用第一个客服账号
-    const kfAccount = kfListResult.account_list[0];
-    const open_kfid = kfAccount.open_kfid;
-    
-    addProcessingLog('KF', '使用客服账号', { 
-      open_kfid: open_kfid,
-      name: kfAccount.name 
-    });
-    
-    // 同步客服消息
-    const syncData = {
-      token: token,
-      limit: 1000,
-      voice_format: 0,
-      open_kfid: open_kfid
-    };
-    
-    const syncResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=${tokenData.access_token}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(syncData)
-    });
-    
-    const syncResult = await syncResponse.json();
-    
-    if (syncResult.errcode !== 0) {
-      throw new Error('同步客服消息失败: ' + syncResult.errmsg);
-    }
-    
-    addProcessingLog('KF', '同步客服消息成功', { 
-      msg_count: syncResult.msg_list ? syncResult.msg_list.length : 0,
-      has_more: syncResult.has_more
-    });
-    
-    console.log('=== 同步到的客服消息 ===');
-    console.log(JSON.stringify(syncResult, null, 2));
-    console.log('=====================');
-    
-    // 记录同步到的消息详情到日志
-    if (syncResult.msg_list && syncResult.msg_list.length > 0) {
-      addProcessingLog('KF', '同步到的消息列表', {
-        msg_count: syncResult.msg_list.length,
-        messages: syncResult.msg_list.map(msg => ({
-          msgid: msg.msgid,
-          msgtype: msg.msgtype,
-          origin: msg.origin,
-          send_time: msg.send_time,
-          content: msg.msgtype === 'text' ? msg.text.content : '非文本消息'
-        }))
-      });
-    }
-    
-    // 处理每条消息（按时间排序，只处理最新的用户消息）
-    if (syncResult.msg_list && syncResult.msg_list.length > 0) {
-      // 筛选出用户发送的消息并按时间排序
-      const userMessages = syncResult.msg_list
-        .filter(msg => msg.origin === 3) // 微信用户发送的消息
-        .sort((a, b) => b.send_time - a.send_time); // 按发送时间倒序排列（最新的在前）
+    // 遍历所有客服账号，分别同步消息
+    for (const kfAccount of kfListResult.account_list) {
+      const open_kfid = kfAccount.open_kfid;
       
-      addProcessingLog('KF', '筛选用户消息', {
-        total_messages: syncResult.msg_list.length,
-        user_messages: userMessages.length,
-        latest_message: userMessages.length > 0 ? {
-          msgid: userMessages[0].msgid,
-          send_time: userMessages[0].send_time,
-          content: userMessages[0].msgtype === 'text' ? userMessages[0].text.content : '非文本'
-        } : null
+      addProcessingLog('KF', '检查客服账号', { 
+        open_kfid: open_kfid,
+        name: kfAccount.name 
       });
       
-      // 只处理最新的一条用户消息
-      if (userMessages.length > 0) {
-        const latestMsg = userMessages[0];
-        await processKfUserMessage(latestMsg, tokenData.access_token);
+      try {
+        // 同步此客服的消息
+        const syncData = {
+          token: token,
+          limit: 1000,
+          voice_format: 0,
+          open_kfid: open_kfid
+        };
+        
+        const syncResponse = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=${tokenData.access_token}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(syncData)
+        });
+        
+        const syncResult = await syncResponse.json();
+        
+        if (syncResult.errcode !== 0) {
+          addProcessingLog('WARN', `客服 ${kfAccount.name} 同步消息失败`, { 
+            open_kfid: open_kfid,
+            error: syncResult.errmsg 
+          });
+          continue; // 跳过这个客服，继续处理下一个
+        }
+        
+        addProcessingLog('KF', `客服 ${kfAccount.name} 同步消息成功`, { 
+          open_kfid: open_kfid,
+          msg_count: syncResult.msg_list ? syncResult.msg_list.length : 0,
+          has_more: syncResult.has_more
+        });
+        
+        // 记录同步到的消息详情到日志
+        if (syncResult.msg_list && syncResult.msg_list.length > 0) {
+          console.log(`=== 客服 ${kfAccount.name} 的消息 ===`);
+          console.log(JSON.stringify(syncResult, null, 2));
+          console.log('=====================');
+          
+          addProcessingLog('KF', '同步到的消息列表', {
+            kf_name: kfAccount.name,
+            open_kfid: open_kfid,
+            msg_count: syncResult.msg_list.length,
+            messages: syncResult.msg_list.map(msg => ({
+              msgid: msg.msgid,
+              msgtype: msg.msgtype,
+              origin: msg.origin,
+              send_time: msg.send_time,
+              content: msg.msgtype === 'text' ? msg.text.content : '非文本消息'
+            }))
+          });
+          
+          // 筛选出用户发送的消息并按时间排序
+          const userMessages = syncResult.msg_list
+            .filter(msg => msg.origin === 3) // 微信用户发送的消息
+            .sort((a, b) => b.send_time - a.send_time); // 按发送时间倒序排列（最新的在前）
+          
+          addProcessingLog('KF', '筛选用户消息', {
+            kf_name: kfAccount.name,
+            open_kfid: open_kfid,
+            total_messages: syncResult.msg_list.length,
+            user_messages: userMessages.length,
+            latest_message: userMessages.length > 0 ? {
+              msgid: userMessages[0].msgid,
+              send_time: userMessages[0].send_time,
+              content: userMessages[0].msgtype === 'text' ? userMessages[0].text.content : '非文本'
+            } : null
+          });
+          
+          // 处理这个客服的最新用户消息
+          if (userMessages.length > 0) {
+            const latestMsg = userMessages[0];
+            await processKfUserMessage(latestMsg, tokenData.access_token);
+          }
+        }
+        
+      } catch (kfError) {
+        addProcessingLog('ERROR', `处理客服 ${kfAccount.name} 消息失败`, {
+          open_kfid: open_kfid,
+          error: kfError.message
+        });
+        console.error(`处理客服 ${kfAccount.name} 消息失败:`, kfError);
+        // 继续处理下一个客服
       }
     }
     
