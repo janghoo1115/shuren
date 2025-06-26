@@ -33,6 +33,9 @@ let processingLogs = [];
 // 存储用户最后回复时间（防止重复回复）
 let userLastReplyTime = new Map();
 
+// 存储已处理的消息ID（防止重复处理）
+let processedMessages = new Set();
+
 // ===== 新增：用户状态管理 =====
 const USER_STATES = {
   UNAUTH: 'unauth',           // 未认证
@@ -448,8 +451,31 @@ async function sendConfirmationMessage(external_userid) {
       throw new Error('获取客服账号失败');
     }
     
-    // 使用第一个客服账号发送确认消息
-    const open_kfid = kfListResult.account_list[0].open_kfid;
+    // 查找随心记客服账号
+    const targetKfId = process.env.WECHAT_KFID || 'kfca677d36885794305';
+    let open_kfid = null;
+    
+    // 寻找指定的客服账号
+    for (const kf of kfListResult.account_list) {
+      if (kf.open_kfid === targetKfId) {
+        open_kfid = kf.open_kfid;
+        break;
+      }
+    }
+    
+    // 如果没找到指定的客服账号，使用第一个客服账号
+    if (!open_kfid && kfListResult.account_list.length > 0) {
+      open_kfid = kfListResult.account_list[0].open_kfid;
+      addProcessingLog('WARN', '未找到指定的随心记客服，使用第一个客服', {
+        external_userid,
+        target_kfid: targetKfId,
+        used_kfid: open_kfid
+      });
+    }
+    
+    if (!open_kfid) {
+      throw new Error('没有找到可用的客服账号');
+    }
     
     const confirmMessage = '认证成功了哈！现在可以把想记的随时发给我罗！';
     
@@ -1248,9 +1274,50 @@ async function handleKfMessage(token) {
             } : null
           });
           
-          // 处理这个客服的最新用户消息
+          // 处理这个客服的最新用户消息（添加去重和客服匹配检查）
           if (userMessages.length > 0) {
             const latestMsg = userMessages[0];
+            
+            // 重要：检查消息是否真正属于当前客服
+            // 只有当消息的open_kfid与当前遍历的客服ID匹配时才处理
+            if (latestMsg.open_kfid !== open_kfid) {
+              addProcessingLog('KF', '消息不属于当前客服，跳过', {
+                kf_name: kfAccount.name,
+                current_kfid: open_kfid,
+                message_kfid: latestMsg.open_kfid,
+                msgid: latestMsg.msgid
+              });
+              continue;
+            }
+            
+            // 检查消息是否已经处理过
+            const messageKey = `${latestMsg.msgid}_${latestMsg.external_userid}`;
+            if (processedMessages.has(messageKey)) {
+              addProcessingLog('KF', '消息已处理，跳过', {
+                kf_name: kfAccount.name,
+                open_kfid: open_kfid,
+                msgid: latestMsg.msgid,
+                external_userid: latestMsg.external_userid
+              });
+              continue;
+            }
+            
+            // 标记消息为已处理
+            processedMessages.add(messageKey);
+            
+            // 清理旧的消息ID（保留最近100条）
+            if (processedMessages.size > 100) {
+              const messagesArray = Array.from(processedMessages);
+              processedMessages = new Set(messagesArray.slice(-50));
+            }
+            
+            addProcessingLog('KF', '开始处理属于当前客服的消息', {
+              kf_name: kfAccount.name,
+              open_kfid: open_kfid,
+              msgid: latestMsg.msgid,
+              content_preview: latestMsg.text ? latestMsg.text.content.substring(0, 50) + '...' : '非文本'
+            });
+            
             await processKfUserMessage(latestMsg, tokenData.access_token);
           }
         }
@@ -1346,17 +1413,28 @@ async function processKfUserMessage(msg, accessToken) {
       content: userContent
     });
     
-    // 防止频繁回复检查
+    // 防止频繁回复检查（基于消息ID的更精确控制）
     const now = Date.now();
-    const lastReplyTime = userLastReplyTime.get(external_userid);
-    const replyInterval = 3000; // 3秒内不重复回复
+    const userKey = `${external_userid}_${msg.msgid}`;
+    const lastReplyTime = userLastReplyTime.get(userKey);
+    const replyInterval = 2000; // 2秒内不重复回复同一条消息
     
     if (lastReplyTime && (now - lastReplyTime) < replyInterval) {
       addProcessingLog('KF', '跳过处理（频率限制）', {
         external_userid,
+        msgid: msg.msgid,
         last_reply_ago: Math.round((now - lastReplyTime) / 1000) + '秒前'
       });
       return;
+    }
+    
+    // 记录本次处理时间
+    userLastReplyTime.set(userKey, now);
+    
+    // 清理旧的时间记录（保留最近50条）
+    if (userLastReplyTime.size > 50) {
+      const entries = Array.from(userLastReplyTime.entries());
+      userLastReplyTime = new Map(entries.slice(-25));
     }
     
     let replyContent = '';
@@ -1516,9 +1594,6 @@ async function processKfUserMessage(msg, accessToken) {
       const replyResult = await replyResponse.json();
       
       if (replyResult.errcode === 0) {
-        // 更新最后回复时间
-        userLastReplyTime.set(external_userid, now);
-        
         addProcessingLog('KF', '回复发送成功', {
           msgid: replyResult.msgid,
           external_userid,
@@ -2007,6 +2082,27 @@ router.get('/debug/kf-logs', (req, res) => {
     timestamp: new Date().toISOString(),
     message: kfLogs.length > 0 ? `已记录 ${kfLogs.length} 条微信客服处理日志` : '暂无微信客服处理日志'
   });
+});
+
+// 调试接口：查看群消息分析日志
+router.get('/debug/group-logs', (req, res) => {
+  try {
+    const groupLogs = groupAnalyzer.getLogs();
+    res.json({
+      group_logs: groupLogs,
+      log_count: groupLogs.length,
+      status: '群消息分析日志服务正常',
+      timestamp: new Date().toISOString(),
+      message: groupLogs.length > 0 ? `已记录 ${groupLogs.length} 条群消息分析日志` : '暂无群消息分析日志',
+      config: groupAnalyzer.getConfig()
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: '获取群消息分析日志失败',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // 调试接口：清除用户回复时间限制
@@ -2568,6 +2664,15 @@ async function refreshAccessToken(external_userid, feishuData) {
         external_userid,
         new_expire_time: new Date(tokenExpireTime).toISOString()
       });
+
+      // 异步发送确认消息，告知用户认证已完成
+      setTimeout(async () => {
+        try {
+          await sendConfirmationMessage(external_userid);
+        } catch (error) {
+          console.error('发送token刷新确认消息失败:', error);
+        }
+      }, 1000);
 
       return { success: true, access_token: newAccessToken };
     } else {
